@@ -410,4 +410,95 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
         <div className="space-y-4">
           {/* Review Controls */}
-          {currentLine
+          {currentLineKey && (
+            <div className="flex items-center justify-center gap-2 p-4 border rounded-lg bg-muted/30">
+              <Button
+                variant="outline"
+                onClick={() => handleNavigate('prev')}
+                disabled={isLoading}
+                className="flex items-center gap-2"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </Button>
+              
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => handleAcceptChange()}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+                >
+                  <Check className="w-4 h-4" />
+                  Accept
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => handleRejectChange()}
+                  disabled={isLoading}
+                  className="flex items-center gap-2"
+                >
+                  <XIcon className="w-4 h-4" />
+                  Reject
+                </Button>
+              </div>
+              
+              <Button
+                variant="outline"
+                onClick={() => handleNavigate('next')}
+                disabled={isLoading}
+                className="flex items-center gap-2"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
+
+          {/* Code Comparison Tabs */}
+          <Tabs defaultValue="diff" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="diff">Side by Side Diff</TabsTrigger>
+              <TabsTrigger value="fixed">Fixed Code Only</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="diff" className="mt-4">
+              <div className="grid grid-cols-2 gap-4 h-[500px]">
+                <div className="border rounded-lg overflow-hidden">
+                  {renderCodeBlock(originalCode, 'Original Code', true)}
+                </div>
+                <div className="border rounded-lg overflow-hidden">
+                  {renderCodeBlock(fixedCode, 'Fixed Code', false)}
+                </div>
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="fixed" className="mt-4">
+              <div className="border rounded-lg overflow-hidden h-[500px]">
+                {renderCodeBlock(fixedCode, 'Fixed Code with Review Options', false)}
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          {/* Download Actions */}
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={isLoading}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={downloadFinalFile}
+              disabled={isLoading}
+              className="flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              {isLoading ? 'Processing...' : 'Download Fixed File'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
