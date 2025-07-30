@@ -25,6 +25,22 @@ export interface GeminiResponse {
   codeSnippets?: string[];
 }
 
+export interface ReviewData {
+  pending_changes: string[];
+  accepted_changes: string[];
+  rejected_changes: string[];
+  current_line: string | null;
+  total_changes: number;
+  reviewed_count: number;
+}
+
+export interface AcceptRejectResponse {
+  success: boolean;
+  message: string;
+  next_line: string | null;
+  review_data: ReviewData;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -177,8 +193,8 @@ class ApiClient {
     }
   }
 
-  // New diff endpoint
-  async getDiff(projectId: string): Promise<ApiResponse<{
+  // Updated diff endpoint with review data
+  async getDiff(projectId: string, onlyAccepted: boolean = false): Promise<ApiResponse<{
     original: string, 
     fixed: string, 
     has_changes: boolean, 
@@ -188,10 +204,67 @@ class ApiClient {
       changed_lines_fixed: number[];
       added_lines: number[];
       removed_lines: number[];
-    }
+    };
+    review_data: ReviewData;
+    session_id: string;
   }>> {
-    return this.request(`/diff/${projectId}`, {
+    const params = onlyAccepted ? '?only_accepted=true' : '';
+    return this.request(`/diff/${projectId}${params}`, {
       method: 'GET',
+    });
+  }
+
+  // Accept/Reject change endpoints
+  async acceptChange(projectId: string, lineKey: string): Promise<ApiResponse<AcceptRejectResponse>> {
+    return this.request('/review/accept-reject', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        projectId, 
+        lineKey, 
+        action: 'accept' 
+      }),
+    });
+  }
+
+  async rejectChange(projectId: string, lineKey: string): Promise<ApiResponse<AcceptRejectResponse>> {
+    return this.request('/review/accept-reject', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        projectId, 
+        lineKey, 
+        action: 'reject' 
+      }),
+    });
+  }
+
+  // Navigation endpoints
+  async navigateToNext(projectId: string, currentLine?: string): Promise<ApiResponse<AcceptRejectResponse>> {
+    return this.request('/review/navigate', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        projectId, 
+        direction: 'next',
+        currentLine 
+      }),
+    });
+  }
+
+  async navigateToPrev(projectId: string, currentLine?: string): Promise<ApiResponse<AcceptRejectResponse>> {
+    return this.request('/review/navigate', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        projectId, 
+        direction: 'prev',
+        currentLine 
+      }),
+    });
+  }
+
+  // Apply only accepted fixes
+  async applyAcceptedFixes(projectId: string): Promise<ApiResponse<{ fixedFilePath: string }>> {
+    return this.request('/process/apply-accepted-fixes', {
+      method: 'POST',
+      body: JSON.stringify({ projectId }),
     });
   }
 }
