@@ -34,10 +34,19 @@ class SessionDatabase:
                     current_fix_index INTEGER DEFAULT 0,
                     temp_fixed_numbered_path TEXT,
                     temp_fixed_denumbered_path TEXT,
+                    final_fixed_path TEXT,  -- Path to final file with only accepted changes
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Add final_fixed_path column if it doesn't exist (for existing databases)
+            try:
+                conn.execute('ALTER TABLE sessions ADD COLUMN final_fixed_path TEXT')
+                conn.commit()
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
             
             conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_sessions_project_id 

@@ -64,7 +64,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const diffResult = await apiClient.getDiff(state.projectId);
 
       if (diffResult.success && diffResult.data) {
-        // Original should be denumbered (clean C++ code), Fixed should be numbered for editing
         setOriginalCode(diffResult.data.original);
         setFixedCode(diffResult.data.fixed);
         setHighlightData(diffResult.data.highlight || null);
@@ -240,7 +239,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  // Highlight differences with review status and add click handlers
+  // Enhanced highlight differences with better line key matching
   const highlightDifferences = (code: string, isOriginal: boolean) => {
     if (!originalCode || !fixedCode || !highlightData) return code;
     
@@ -268,49 +267,54 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       
       // For fixed code view, determine review status and actions
       if (!isOriginal) {
-        // Get all available changes from snippet keys
+        // Get line number (1-based)
+        const lineNumber = index + 1;
+        
+        // Find matching line key from all changes
         const allChanges = [...(reviewData.pending_changes || []), ...(reviewData.accepted_changes || []), ...(reviewData.rejected_changes || [])];
         
-        // Find if this line corresponds to a reviewable change
-        const lineKey = allChanges.find(key => {
+        // Match line key based on line number
+        const matchingLineKey = allChanges.find(key => {
           const baseLineNum = parseInt(key.replace(/[a-z]/g, ''));
+          
           if (key.includes('a')) {
-            // For added lines (e.g., "5a"), match the line after base line
-            return baseLineNum + 1 === index + 1;
+            // For added lines (e.g., "5a"), check if this is an added line at the right position
+            return addedLines.has(index) && Math.abs(baseLineNum - lineNumber) <= 2;
           } else {
-            // For modified lines, match exact line number
-            return baseLineNum === index + 1;
+            // For modified lines, check if this is a changed line
+            return changedLines.has(index) && Math.abs(baseLineNum - lineNumber) <= 2;
           }
         });
         
-        if (lineKey) {
-          const isAccepted = reviewData.accepted_changes?.includes(lineKey);
-          const isRejected = reviewData.rejected_changes?.includes(lineKey);
-          const isPending = reviewData.pending_changes?.includes(lineKey);
-          const isCurrent = currentLineKey === lineKey;
-        
-          // Only show actions for changed/added lines that are pending review
-          const isChangedOrAdded = addedLines.has(index) || changedLines.has(index);
+        if (matchingLineKey) {
+          const isAccepted = reviewData.accepted_changes?.includes(matchingLineKey);
+          const isRejected = reviewData.rejected_changes?.includes(matchingLineKey);
+          const isPending = reviewData.pending_changes?.includes(matchingLineKey);
+          const isCurrent = currentLineKey === matchingLineKey;
           
-          if (isChangedOrAdded) {
+          // Only show review options for changed or added lines
+          const isReviewableLine = addedLines.has(index) || changedLines.has(index);
+          
+          if (isReviewableLine) {
             if (isAccepted) {
-              className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-              statusBadge = <Badge variant="default" className="ml-2 text-xs">✓ Accepted</Badge>;
+              className = 'bg-green-50 border-l-4 border-l-green-500 dark:bg-green-950/20 dark:border-l-green-400';
+              statusBadge = <Badge variant="default" className="ml-2 text-xs bg-green-100 text-green-800">✓ Accepted</Badge>;
             } else if (isRejected) {
-              className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+              className = 'bg-red-50 border-l-4 border-l-red-500 dark:bg-red-950/20 dark:border-l-red-400';
               statusBadge = <Badge variant="destructive" className="ml-2 text-xs">✗ Rejected</Badge>;
-            } else if (isPending) {
-              className = 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
-              statusBadge = <Badge variant="secondary" className="ml-2 text-xs">⏳ Pending</Badge>;
+            } else {
+              // Show as pending (default state for all changes)
+              className = 'bg-yellow-50 border-l-4 border-l-yellow-500 dark:bg-yellow-950/20 dark:border-l-yellow-400';
+              statusBadge = <Badge variant="secondary" className="ml-2 text-xs bg-yellow-100 text-yellow-800">⏳ Pending</Badge>;
               
-              // Add accept/reject buttons for pending changes
+              // Show accept/reject buttons for pending changes
               actionButtons = (
                 <div className="flex gap-1 ml-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-xs bg-green-50 hover:bg-green-100 border-green-300"
-                    onClick={() => handleAcceptChange(lineKey)}
+                    className="h-6 px-2 text-xs bg-green-50 hover:bg-green-100 border-green-300 text-green-700"
+                    onClick={() => handleAcceptChange(matchingLineKey)}
                     disabled={isLoading}
                   >
                     ✓
@@ -318,8 +322,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-xs bg-red-50 hover:bg-red-100 border-red-300"
-                    onClick={() => handleRejectChange(lineKey)}
+                    className="h-6 px-2 text-xs bg-red-50 hover:bg-red-100 border-red-300 text-red-700"
+                    onClick={() => handleRejectChange(matchingLineKey)}
                     disabled={isLoading}
                   >
                     ✗
@@ -329,21 +333,21 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             }
             
             if (isCurrent) {
-              className += ' ring-2 ring-primary';
+              className += ' ring-2 ring-blue-500';
             }
           }
         }
       } else {
-        // Original code - just highlight changed lines without review status
+        // Original code - highlight changed lines
         if (changedLines.has(index)) {
-          className = 'bg-blue-50 border-l-2 border-l-blue-400 dark:bg-blue-950/20 dark:border-l-blue-500';
+          className = 'bg-blue-50 border-l-4 border-l-blue-500 dark:bg-blue-950/20 dark:border-l-blue-400';
         }
       }
       
       return (
-        <div key={index} className={`${className} px-2 py-0.5 flex items-center justify-between hover:bg-muted/50`}>
-          <span className="font-mono text-sm">{line}</span>
-          <div className="flex items-center">
+        <div key={index} className={`${className} px-3 py-1 flex items-center justify-between hover:bg-muted/30 min-h-[24px]`}>
+          <span className="font-mono text-sm flex-1">{line || ' '}</span>
+          <div className="flex items-center shrink-0">
             {statusBadge}
             {actionButtons}
           </div>
@@ -362,7 +366,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         ref={isOriginal ? originalScrollRef : fixedScrollRef}
         className="overflow-auto h-[500px]"
       >
-        <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-5">
+        <pre className="text-xs font-mono whitespace-pre-wrap break-words leading-6">
           <code className="block">
             {code ? (
               isOriginal !== undefined ? (
@@ -391,7 +395,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Eye className="w-5 h-5" />
-            Code Fix Review
+            Code Fix Review - Accept/Reject Changes
           </DialogTitle>
           
           {/* Review Progress */}
@@ -406,122 +410,4 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
         <div className="space-y-4">
           {/* Review Controls */}
-          {currentLineKey && (
-            <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
-              <span className="text-sm font-medium">Current Change:</span>
-              <Badge variant="outline">Line {currentLineKey}</Badge>
-              <div className="flex gap-2 ml-auto">
-                <Button
-                  size="sm"
-                  onClick={() => handleAcceptChange()}
-                  disabled={isLoading}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  <Check className="w-4 h-4 mr-1" />
-                  Accept
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => handleRejectChange()}
-                  disabled={isLoading}
-                >
-                  <XIcon className="w-4 h-4 mr-1" />
-                  Reject
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleNavigate('prev')}
-                  disabled={isLoading}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleNavigate('next')}
-                  disabled={isLoading}
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* View Options */}
-          <Tabs defaultValue="review" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="review">Review Mode</TabsTrigger>
-              <TabsTrigger value="diff">All Changes</TabsTrigger>
-              <TabsTrigger value="accepted">Accepted Only</TabsTrigger>
-              <TabsTrigger value="original">Original Code</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="review" className="mt-4">
-              <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original Code", true)}
-                <div className="border-l">
-                  {renderCodeBlock(fixedCode, "Fixed Code (Click ✓/✗ to Accept/Reject)", false)}
-                </div>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Badge variant="default" className="text-xs">✓</Badge>
-                  <span>Accepted changes</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="destructive" className="text-xs">✗</Badge>
-                  <span>Rejected changes</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-xs">⏳</Badge>
-                  <span>Pending review</span>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="diff" className="mt-4">
-              <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original", true)}
-                <div className="border-l">
-                  {renderCodeBlock(fixedCode, "All Fixed Changes", false)}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="accepted" className="mt-4">
-              <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original", true)}
-                <div className="border-l">
-                  {renderCodeBlock(fixedCode, "Accepted Changes Only", false)}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="original" className="mt-4">
-              <div className="h-[500px] border rounded-lg overflow-hidden">
-                {renderCodeBlock(originalCode, "Original Code")}
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center pt-4 border-t gap-3">
-            <Button variant="outline" onClick={onClose} className="order-2 sm:order-1">
-              Close
-            </Button>
-            <Button 
-              onClick={downloadFinalFile}
-              disabled={isLoading || reviewData.reviewed_count === 0}
-              className="order-1 sm:order-2"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              {isLoading ? 'Processing...' : 'Download Accepted Changes'}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+          {currentLine
