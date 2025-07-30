@@ -18,6 +18,7 @@ from denumbering import remove_line_numbers
 from replace import merge_fixed_snippets_into_file
 from fixed_response_code_snippet import extract_snippets_from_response, save_snippets_to_json
 from diff_utils import create_temp_fixed_denumbered_file, get_file_content, create_diff_data, cleanup_temp_files
+from review_manager import ReviewManager
 
 app = FastAPI(
     title="MISRA Fix Copilot API",
@@ -114,6 +115,19 @@ class DiffResponse(BaseModel):
     fixed: str
     has_changes: bool
     highlight: dict = {}
+
+class ReviewActionRequest(BaseModel):
+    projectId: str
+    line_key: str
+    action: str  # 'accept' or 'reject'
+
+class NavigationRequest(BaseModel):
+    projectId: str
+    index: int
+
+class ReviewStateResponse(BaseModel):
+    fixes: List[Dict[str, Any]]
+    summary: Dict[str, Any]
 
 # Initialize Vertex AI on startup
 @app.on_event("startup")
@@ -569,6 +583,133 @@ async def get_diff(project_id: str):
         session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
         
         return DiffResponse(**diff_data)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# New Review Management Endpoints
+
+@app.get("/api/review/state/{project_id}", response_model=ReviewStateResponse)
+async def get_review_state(project_id: str):
+    """Get current review state for all fixes"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        fixed_snippets = session.get('fixed_snippets', {})
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        fixes = review_manager.get_fix_list(fixed_snippets)
+        summary = review_manager.get_review_summary(fixed_snippets)
+        
+        return ReviewStateResponse(fixes=fixes, summary=summary)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/action")
+async def review_action(request: ReviewActionRequest):
+    """Accept or reject a specific fix"""
+    try:
+        project_id = request.projectId
+        line_key = request.line_key
+        action = request.action
+        
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        
+        if action == "accept":
+            review_manager.accept_line(line_key)
+        elif action == "reject":
+            review_manager.reject_line(line_key)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action. Use 'accept' or 'reject'")
+        
+        # Update temporary files with only accepted changes
+        session = sessions[project_id]
+        fixed_snippets = session.get('fixed_snippets', {})
+        numbered_file = session.get('numbered_file')
+        
+        if numbered_file:
+            accepted_snippets = review_manager.get_accepted_snippets(fixed_snippets)
+            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                numbered_file, accepted_snippets, project_id, UPLOAD_FOLDER
+            )
+            session['temp_fixed_numbered'] = temp_fixed_numbered_path
+            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+        
+        return {"success": True, "message": f"Line {line_key} {action}ed successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/navigate")
+async def navigate_review(request: NavigationRequest):
+    """Set current review navigation index"""
+    try:
+        project_id = request.projectId
+        index = request.index
+        
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        review_manager.set_current_review_index(index)
+        
+        return {"success": True, "current_index": index}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/reset/{project_id}")
+async def reset_review(project_id: str):
+    """Reset all review decisions for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        review_manager.reset_review()
+        
+        return {"success": True, "message": "Review state reset successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/process/apply-accepted-fixes", response_model=ApplyFixesResponse)
+async def process_apply_accepted_fixes(request: ApplyFixesRequest):
+    """Apply only the accepted fixes to create final file"""
+    try:
+        project_id = request.projectId
+        
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        numbered_file = session['numbered_file']
+        all_fixed_snippets = session.get('fixed_snippets', {})
+        
+        # Get only accepted snippets
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        accepted_snippets = review_manager.get_accepted_snippets(all_fixed_snippets)
+        
+        # Apply only accepted fixes
+        fixed_filename = f"fixed_{session['original_filename']}"
+        fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{session['original_filename']}")
+        
+        merge_fixed_snippets_into_file(numbered_file, accepted_snippets, fixed_numbered_path)
+        
+        # Remove line numbers for final file
+        final_fixed_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{fixed_filename}")
+        remove_line_numbers(fixed_numbered_path, final_fixed_path)
+        
+        # Update session
+        sessions[project_id]['fixed_file'] = final_fixed_path
+        
+        return ApplyFixesResponse(fixedFilePath=final_fixed_path)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -194,6 +194,63 @@ class ApiClient {
       method: 'GET',
     });
   }
+
+  // Review management endpoints
+  async getReviewState(projectId: string): Promise<ApiResponse<{
+    fixes: Array<{
+      index: number;
+      line_key: string;
+      content: string;
+      status: 'accepted' | 'rejected' | 'pending';
+    }>;
+    summary: {
+      total_fixes: number;
+      accepted_count: number;
+      rejected_count: number;
+      pending_count: number;
+      current_review_index: number;
+    };
+  }>> {
+    return this.request(`/review/state/${projectId}`, {
+      method: 'GET',
+    });
+  }
+
+  async reviewAction(projectId: string, line_key: string, action: 'accept' | 'reject'): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request('/review/action', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, line_key, action }),
+    });
+  }
+
+  async navigateReview(projectId: string, index: number): Promise<ApiResponse<{
+    success: boolean;
+    current_index: number;
+  }>> {
+    return this.request('/review/navigate', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, index }),
+    });
+  }
+
+  async resetReview(projectId: string): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request(`/review/reset/${projectId}`, {
+      method: 'POST',
+    });
+  }
+
+  async applyAcceptedFixes(projectId: string): Promise<ApiResponse<{ fixedFilePath: string }>> {
+    return this.request('/process/apply-accepted-fixes', {
+      method: 'POST',
+      body: JSON.stringify({ projectId }),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

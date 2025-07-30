@@ -18,7 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
 import { v4 as uuidv4 } from 'uuid';
 import ViolationsModalUpdated from './ViolationsModalUpdated';
-import FixViewModal from './FixViewModal';
+import FixReviewModal from './FixReviewModal';
 import ChatFeedbackModal from './ChatFeedbackModal';
 
 export default function NewWorkflowPanel() {
@@ -317,7 +317,7 @@ export default function NewWorkflowPanel() {
           <CardContent className="space-y-4">
             <div className="text-sm text-muted-foreground">
               Fixes have been applied to {state.selectedViolations.length} violations.
-              Review the changes before downloading.
+              Review and accept/reject individual fixes before downloading.
             </div>
 
             <Button
@@ -326,7 +326,7 @@ export default function NewWorkflowPanel() {
               className="w-full"
             >
               <Eye className="w-4 h-4 mr-2" />
-              View Fix & Download
+              Review Fixes & Download
             </Button>
           </CardContent>
         </Card>
@@ -354,7 +354,7 @@ export default function NewWorkflowPanel() {
         onFixComplete={() => setShowFixViewModal(true)}
       />
       
-      <FixViewModal 
+      <FixReviewModal 
         isOpen={showFixViewModal} 
         onClose={() => setShowFixViewModal(false)} 
       />
