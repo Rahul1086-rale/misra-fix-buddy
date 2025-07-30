@@ -40,7 +40,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const [currentFixIndex, setCurrentFixIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [highlightData, setHighlightData] = useState<any>(null);
-  const [codeSnippets, setCodeSnippets] = useState<Record<string, string>>({});
   
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const fixedScrollRef = useRef<HTMLDivElement>(null);
@@ -64,11 +63,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     setIsLoading(true);
     try {
-      // Load review state, diff data, and code snippets in parallel
-      const [reviewResponse, diffResponse, snippetsResponse] = await Promise.all([
+      // Load review state and diff data in parallel
+      const [reviewResponse, diffResponse] = await Promise.all([
         apiClient.getReviewState(state.projectId),
-        apiClient.getDiff(state.projectId),
-        apiClient.getCodeSnippets(state.projectId)
+        apiClient.getDiff(state.projectId)
       ]);
 
       if (reviewResponse.success && reviewResponse.data) {
@@ -81,10 +79,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         setOriginalCode(diffResponse.data.original);
         setFixedCode(diffResponse.data.fixed);
         setHighlightData(diffResponse.data.highlight);
-      }
-
-      if (snippetsResponse.success && snippetsResponse.data) {
-        setCodeSnippets(snippetsResponse.data);
       }
     } catch (error) {
       console.error('Failed to load review data:', error);
@@ -259,195 +253,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     setTimeout(() => {
       isSyncingScroll.current = false;
     }, 10);
-  };
-
-  // Parse JSON structure to identify different types of changes
-  const parseJsonChanges = () => {
-    if (!codeSnippets) return { deletions: [], modifications: [], additions: [] };
-    
-    const deletions: Array<{lineKey: string, lineNum: number, status: string}> = [];
-    const modifications: Array<{lineKey: string, lineNum: number, content: string, status: string}> = [];
-    const additions: Array<{lineKey: string, lineNum: number, content: string, status: string}> = [];
-    
-    Object.entries(codeSnippets).forEach(([lineKey, content]) => {
-      const match = lineKey.match(/^(\d+)([a-z]*)$/);
-      if (!match) return;
-      
-      const baseLineNum = parseInt(match[1]);
-      const suffix = match[2];
-      const status = fixes.find(f => f.line_key === lineKey)?.status || 'pending';
-      
-      if (suffix) {
-        // New line addition (e.g., "33a", "33b")
-        additions.push({ lineKey, lineNum: baseLineNum, content: content as string, status });
-      } else if (content === "") {
-        // Deleted line
-        deletions.push({ lineKey, lineNum: baseLineNum, status });
-      } else {
-        // Modified line
-        modifications.push({ lineKey, lineNum: baseLineNum, content: content as string, status });
-      }
-    });
-    
-    return { deletions, modifications, additions };
-  };
-
-  const renderInlineDiffView = () => {
-    if (!originalCode || !codeSnippets) return <div>Loading...</div>;
-    
-    const originalLines = originalCode.split('\n');
-    const { deletions, modifications, additions } = parseJsonChanges();
-    
-    // Create a map for quick lookup
-    const deletionMap = new Map(deletions.map(d => [d.lineNum, d]));
-    const modificationMap = new Map(modifications.map(m => [m.lineNum, m]));
-    const additionMap = new Map<number, Array<{lineKey: string, content: string, status: string}>>();
-    
-    additions.forEach(add => {
-      if (!additionMap.has(add.lineNum)) {
-        additionMap.set(add.lineNum, []);
-      }
-      additionMap.get(add.lineNum)?.push(add);
-    });
-
-    return (
-      <div className="space-y-0 font-mono text-xs">
-        {originalLines.map((line, index) => {
-          const lineNum = index + 1;
-          const deletion = deletionMap.get(lineNum);
-          const modification = modificationMap.get(lineNum);
-          const additionsAtLine = additionMap.get(lineNum) || [];
-          
-          return (
-            <React.Fragment key={lineNum}>
-              {/* Show additions before this line */}
-              {additionsAtLine.map((addition, addIndex) => (
-                <div key={`${lineNum}-add-${addIndex}`} className="flex items-center group">
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-muted border-r">
-                    {lineNum}
-                  </div>
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-green-50 border-r">
-                    +
-                  </div>
-                  <div className="flex-1 flex items-center bg-green-50 dark:bg-green-950/20 border-l-2 border-l-green-400">
-                    <div className="flex-1 px-2 py-1">
-                      + {addition.content}
-                    </div>
-                    <div className="flex gap-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => handleReviewAction(addition.lineKey, 'accept')}
-                        disabled={addition.status === 'accepted'}
-                      >
-                        <Check className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs text-red-600"
-                        onClick={() => handleReviewAction(addition.lineKey, 'reject')}
-                        disabled={addition.status === 'rejected'}
-                      >
-                        <XIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              
-              {/* Show deletion */}
-              {deletion && (
-                <div className="flex items-center group">
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-red-50 border-r">
-                    {lineNum}
-                  </div>
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-muted border-r">
-                    -
-                  </div>
-                  <div className="flex-1 flex items-center bg-red-50 dark:bg-red-950/20 border-l-2 border-l-red-400">
-                    <div className="flex-1 px-2 py-1 line-through text-muted-foreground">
-                      - {line}
-                    </div>
-                    <div className="flex gap-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => handleReviewAction(deletion.lineKey, 'accept')}
-                        disabled={deletion.status === 'accepted'}
-                      >
-                        <Check className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs text-red-600"
-                        onClick={() => handleReviewAction(deletion.lineKey, 'reject')}
-                        disabled={deletion.status === 'rejected'}
-                      >
-                        <XIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {/* Show modification or original line */}
-              {modification ? (
-                <div className="flex items-center group">
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-yellow-50 border-r">
-                    {lineNum}
-                  </div>
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-yellow-50 border-r">
-                    ~
-                  </div>
-                  <div className="flex-1 flex items-center bg-yellow-50 dark:bg-yellow-950/20 border-l-2 border-l-yellow-400">
-                    <div className="flex-1 px-2 py-1">
-                      <div className="text-red-600 line-through">- {line}</div>
-                      <div className="text-green-600">+ {modification.content}</div>
-                    </div>
-                    <div className="flex gap-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => handleReviewAction(modification.lineKey, 'accept')}
-                        disabled={modification.status === 'accepted'}
-                      >
-                        <Check className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-xs text-red-600"
-                        onClick={() => handleReviewAction(modification.lineKey, 'reject')}
-                        disabled={modification.status === 'rejected'}
-                      >
-                        <XIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : !deletion && (
-                <div className="flex items-center">
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-muted border-r">
-                    {lineNum}
-                  </div>
-                  <div className="w-12 text-right pr-2 text-muted-foreground bg-muted border-r">
-                    
-                  </div>
-                  <div className="flex-1 px-2 py-1">
-                    {line}
-                  </div>
-                </div>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-    );
   };
 
   const highlightDifferences = (code: string, isOriginal: boolean) => {
@@ -642,21 +447,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           )}
 
           {/* Code Diff View */}
-          <Tabs defaultValue="inline" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="inline">Inline Review</TabsTrigger>
-              <TabsTrigger value="diff">Side by Side</TabsTrigger>
+          <Tabs defaultValue="diff" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="diff">Diff View</TabsTrigger>
               <TabsTrigger value="original">Original Code</TabsTrigger>
               <TabsTrigger value="fixed">Fixed Code (Accepted Changes)</TabsTrigger>
             </TabsList>
-
-            <TabsContent value="inline" className="mt-4">
-              <div className="h-[500px] border rounded-lg overflow-auto bg-background">
-                <div className="p-4">
-                  {renderInlineDiffView()}
-                </div>
-              </div>
-            </TabsContent>
 
             <TabsContent value="diff" className="mt-4">
               <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">

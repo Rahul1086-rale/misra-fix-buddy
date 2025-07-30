@@ -724,21 +724,6 @@ async def health_check():
 async def root():
     return {"message": "MISRA Fix Copilot API Server is running"}
 
-@app.get("/api/code-snippets/{project_id}")
-async def get_code_snippets(project_id: str):
-    """Get code snippets for a project"""
-    try:
-        if project_id not in sessions:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        session = sessions[project_id]
-        snippets = session.get('fixed_snippets', {})
-        
-        return {"success": True, "snippets": snippets}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)

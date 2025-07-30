@@ -251,12 +251,6 @@ class ApiClient {
       body: JSON.stringify({ projectId }),
     });
   }
-
-  async getCodeSnippets(projectId: string): Promise<ApiResponse<Record<string, string>>> {
-    return this.request(`/code-snippets/${projectId}`, {
-      method: 'GET',
-    });
-  }
 }
 
 export const apiClient = new ApiClient();
