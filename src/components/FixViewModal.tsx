@@ -42,7 +42,7 @@ export default function FixViewModal({ isOpen, onClose }: FixViewModalProps) {
     
     setIsLoading(true);
     try {
-      // Use the enhanced diff API with review data
+      // Use the diff API to get proper comparison
       const diffResult = await apiClient.getDiff(state.projectId);
 
       if (diffResult.success && diffResult.data) {
@@ -70,8 +70,8 @@ export default function FixViewModal({ isOpen, onClose }: FixViewModalProps) {
     try {
       setIsLoading(true);
       
-      // Apply only accepted fixes 
-      const mergeResponse = await apiClient.applyAcceptedFixes(state.projectId);
+      // First apply fixes and denumber
+      const mergeResponse = await apiClient.applyFixes(state.projectId);
       
       if (mergeResponse.success) {
         // Then download the final file
