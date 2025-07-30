@@ -2,65 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
-/* MISRA Fix Copilot Design System - Professional IDE-like theme */
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
 
 @layer base {
   :root {
-    /* Core theme - Professional dark coding environment */
-    --background: 215 28% 8%;
-    --foreground: 213 31% 91%;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
 
-    --card: 215 25% 12%;
-    --card-foreground: 213 31% 91%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
 
-    --popover: 215 25% 12%;
-    --popover-foreground: 213 31% 91%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
 
-    /* Primary - MISRA Blue theme */
-    --primary: 213 94% 68%;
-    --primary-foreground: 215 28% 8%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
 
-    --secondary: 215 20% 17%;
-    --secondary-foreground: 213 31% 91%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 215 20% 17%;
-    --muted-foreground: 213 15% 65%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 215 20% 17%;
-    --accent-foreground: 213 31% 91%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
 
-    /* Status colors for MISRA violations */
-    --destructive: 0 75% 60%;
-    --destructive-foreground: 213 31% 91%;
-    --warning: 38 100% 67%;
-    --warning-foreground: 215 28% 8%;
-    --success: 142 76% 36%;
-    --success-foreground: 213 31% 91%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
 
-    --border: 215 20% 20%;
-    --input: 215 20% 17%;
-    --ring: 213 94% 68%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
 
-    --radius: 0.375rem;
-
-    /* Code editor styling */
-    --code-bg: 215 25% 10%;
-    --code-line-numbers: 213 15% 50%;
-    --code-selection: 213 94% 68% / 0.2;
-    --code-keyword: 269 100% 83%;
-    --code-string: 142 76% 65%;
-    --code-comment: 213 15% 55%;
-    --code-number: 213 94% 68%;
-    --code-violation: 0 75% 60% / 0.3;
-
-    /* Gradients for professional look */
-    --gradient-primary: linear-gradient(135deg, hsl(213 94% 68%), hsl(213 94% 58%));
-    --gradient-card: linear-gradient(145deg, hsl(215 25% 12%), hsl(215 25% 14%));
-    --gradient-violation: linear-gradient(90deg, hsl(0 75% 60% / 0.1), transparent);
-
-    /* Shadows for depth */
-    --shadow-card: 0 4px 20px hsl(215 28% 8% / 0.5);
-    --shadow-violation: 0 0 0 1px hsl(0 75% 60% / 0.3);
+    --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
 
