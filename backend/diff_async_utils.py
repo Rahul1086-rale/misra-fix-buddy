@@ -127,8 +127,17 @@ async def create_diff_data_async(
         temp_fixed_denumbered_path=temp_fixed_denumbered_path
     )
     
-    # Read file contents
-    original_content = await get_file_content_async(numbered_file_path)
+    # Read file contents - get denumbered original for clean display
+    original_denumbered_path = numbered_file_path.replace('numbered_', 'denumbered_temp_')
+    
+    # Create temporary denumbered original file
+    def _create_denumbered_original():
+        remove_line_numbers(numbered_file_path, original_denumbered_path)
+    
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(executor, _create_denumbered_original)
+    
+    original_content = await get_file_content_async(original_denumbered_path)
     fixed_content = await get_file_content_async(temp_fixed_denumbered_path)
     
     # Extract precise line mappings and changes

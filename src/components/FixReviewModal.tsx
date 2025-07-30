@@ -64,6 +64,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const diffResult = await apiClient.getDiff(state.projectId);
 
       if (diffResult.success && diffResult.data) {
+        // Original should be denumbered (clean C++ code), Fixed should be numbered for editing
         setOriginalCode(diffResult.data.original);
         setFixedCode(diffResult.data.fixed);
         setHighlightData(diffResult.data.highlight || null);
@@ -239,7 +240,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  // Highlight differences with review status
+  // Highlight differences with review status and add click handlers
   const highlightDifferences = (code: string, isOriginal: boolean) => {
     if (!originalCode || !fixedCode || !highlightData) return code;
     
@@ -263,39 +264,89 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return codeLines.map((line, index) => {
       let className = '';
       let statusBadge = null;
+      let actionButtons = null;
       
-      // Determine review status for this line
-      const lineKey = `${index + 1}`;
-      const isAccepted = reviewData.accepted_changes.includes(lineKey);
-      const isRejected = reviewData.rejected_changes.includes(lineKey);
-      const isPending = reviewData.pending_changes.includes(lineKey);
-      const isCurrent = currentLineKey === lineKey;
-      
-      if (addedLines.has(index)) {
-        className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-        if (isAccepted) statusBadge = <Badge variant="default" className="ml-2 text-xs">✓</Badge>;
-        if (isRejected) statusBadge = <Badge variant="destructive" className="ml-2 text-xs">✗</Badge>;
-      } else if (changedLines.has(index)) {
-        if (isAccepted) {
-          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-          statusBadge = <Badge variant="default" className="ml-2 text-xs">✓ Accepted</Badge>;
-        } else if (isRejected) {
-          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
-          statusBadge = <Badge variant="destructive" className="ml-2 text-xs">✗ Rejected</Badge>;
-        } else if (isPending) {
-          className = 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
-          statusBadge = <Badge variant="secondary" className="ml-2 text-xs">⏳ Pending</Badge>;
+      // For fixed code view, determine review status and actions
+      if (!isOriginal) {
+        // Get all available changes from snippet keys
+        const allChanges = [...(reviewData.pending_changes || []), ...(reviewData.accepted_changes || []), ...(reviewData.rejected_changes || [])];
+        
+        // Find if this line corresponds to a reviewable change
+        const lineKey = allChanges.find(key => {
+          const baseLineNum = parseInt(key.replace(/[a-z]/g, ''));
+          if (key.includes('a')) {
+            // For added lines (e.g., "5a"), match the line after base line
+            return baseLineNum + 1 === index + 1;
+          } else {
+            // For modified lines, match exact line number
+            return baseLineNum === index + 1;
+          }
+        });
+        
+        if (lineKey) {
+          const isAccepted = reviewData.accepted_changes?.includes(lineKey);
+          const isRejected = reviewData.rejected_changes?.includes(lineKey);
+          const isPending = reviewData.pending_changes?.includes(lineKey);
+          const isCurrent = currentLineKey === lineKey;
+        
+          // Only show actions for changed/added lines that are pending review
+          const isChangedOrAdded = addedLines.has(index) || changedLines.has(index);
+          
+          if (isChangedOrAdded) {
+            if (isAccepted) {
+              className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+              statusBadge = <Badge variant="default" className="ml-2 text-xs">✓ Accepted</Badge>;
+            } else if (isRejected) {
+              className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+              statusBadge = <Badge variant="destructive" className="ml-2 text-xs">✗ Rejected</Badge>;
+            } else if (isPending) {
+              className = 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+              statusBadge = <Badge variant="secondary" className="ml-2 text-xs">⏳ Pending</Badge>;
+              
+              // Add accept/reject buttons for pending changes
+              actionButtons = (
+                <div className="flex gap-1 ml-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs bg-green-50 hover:bg-green-100 border-green-300"
+                    onClick={() => handleAcceptChange(lineKey)}
+                    disabled={isLoading}
+                  >
+                    ✓
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs bg-red-50 hover:bg-red-100 border-red-300"
+                    onClick={() => handleRejectChange(lineKey)}
+                    disabled={isLoading}
+                  >
+                    ✗
+                  </Button>
+                </div>
+              );
+            }
+            
+            if (isCurrent) {
+              className += ' ring-2 ring-primary';
+            }
+          }
+        }
+      } else {
+        // Original code - just highlight changed lines without review status
+        if (changedLines.has(index)) {
+          className = 'bg-blue-50 border-l-2 border-l-blue-400 dark:bg-blue-950/20 dark:border-l-blue-500';
         }
       }
       
-      if (isCurrent) {
-        className += ' ring-2 ring-primary';
-      }
-      
       return (
-        <div key={index} className={`${className} px-2 py-0.5 flex items-center justify-between`}>
-          <span>{line}</span>
-          {statusBadge}
+        <div key={index} className={`${className} px-2 py-0.5 flex items-center justify-between hover:bg-muted/50`}>
+          <span className="font-mono text-sm">{line}</span>
+          <div className="flex items-center">
+            {statusBadge}
+            {actionButtons}
+          </div>
         </div>
       );
     });
@@ -409,9 +460,9 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
             <TabsContent value="review" className="mt-4">
               <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original (Numbered)", true)}
+                {renderCodeBlock(originalCode, "Original Code", true)}
                 <div className="border-l">
-                  {renderCodeBlock(fixedCode, "Fixed (With Review Status)", false)}
+                  {renderCodeBlock(fixedCode, "Fixed Code (Click ✓/✗ to Accept/Reject)", false)}
                 </div>
               </div>
               <div className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-4">
