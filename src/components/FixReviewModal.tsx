@@ -40,6 +40,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const [currentFixIndex, setCurrentFixIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [highlightData, setHighlightData] = useState<any>(null);
+  const [codeSnippets, setCodeSnippets] = useState<any>({});
   
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const fixedScrollRef = useRef<HTMLDivElement>(null);
@@ -63,10 +64,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     setIsLoading(true);
     try {
-      // Load review state and diff data in parallel
-      const [reviewResponse, diffResponse] = await Promise.all([
+      // Load review state, diff data, and code snippets in parallel
+      const [reviewResponse, diffResponse, snippetsResponse] = await Promise.all([
         apiClient.getReviewState(state.projectId),
-        apiClient.getDiff(state.projectId)
+        apiClient.getDiff(state.projectId),
+        apiClient.getCodeSnippets(state.projectId)
       ]);
 
       if (reviewResponse.success && reviewResponse.data) {
@@ -79,6 +81,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         setOriginalCode(diffResponse.data.original);
         setFixedCode(diffResponse.data.fixed);
         setHighlightData(diffResponse.data.highlight);
+      }
+
+      if (snippetsResponse.success && snippetsResponse.data) {
+        setCodeSnippets(snippetsResponse.data);
       }
     } catch (error) {
       console.error('Failed to load review data:', error);
@@ -294,6 +300,136 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     });
   };
 
+  // Function to compare original line with fixed snippet content
+  const getLineChangeType = (lineKey: string, originalLines: string[]) => {
+    const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
+    const isNewLine = /[a-z]$/.test(lineKey);
+    
+    if (isNewLine) {
+      return { type: 'added', originalContent: '', fixedContent: codeSnippets[lineKey] || '' };
+    }
+    
+    const originalContent = originalLines[lineNumber - 1]?.trim() || '';
+    const fixedContent = codeSnippets[lineKey]?.trim() || '';
+    
+    if (!originalContent && fixedContent) {
+      return { type: 'added', originalContent: '', fixedContent };
+    }
+    
+    if (originalContent && !fixedContent) {
+      return { type: 'deleted', originalContent, fixedContent: '' };
+    }
+    
+    if (originalContent !== fixedContent) {
+      return { type: 'modified', originalContent, fixedContent };
+    }
+    
+    return { type: 'unchanged', originalContent, fixedContent };
+  };
+
+  // Render inline diff view with accept/reject buttons for each change
+  const renderInlineDiffView = () => {
+    if (!originalCode || !codeSnippets) return <div>Loading...</div>;
+    
+    const originalLines = originalCode.split('\n');
+    const sortedSnippetKeys = Object.keys(codeSnippets).sort((a, b) => {
+      const aNum = parseInt(a.match(/^(\d+)/)?.[1] || '0');
+      const bNum = parseInt(b.match(/^(\d+)/)?.[1] || '0');
+      return aNum - bNum || a.localeCompare(b);
+    });
+
+    return (
+      <div className="space-y-2">
+        {sortedSnippetKeys.map((lineKey) => {
+          const changeInfo = getLineChangeType(lineKey, originalLines);
+          const fix = fixes.find(f => f.line_key === lineKey);
+          
+          // Only show if there's an actual change
+          if (changeInfo.type === 'unchanged') return null;
+          
+          return (
+            <div key={lineKey} className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Line {lineKey}</span>
+                  <Badge variant={
+                    changeInfo.type === 'added' ? 'default' :
+                    changeInfo.type === 'deleted' ? 'destructive' : 'secondary'
+                  }>
+                    {changeInfo.type.charAt(0).toUpperCase() + changeInfo.type.slice(1)}
+                  </Badge>
+                  {fix && (
+                    <Badge variant={
+                      fix.status === 'accepted' ? 'default' :
+                      fix.status === 'rejected' ? 'destructive' : 'secondary'
+                    }>
+                      {fix.status}
+                    </Badge>
+                  )}
+                </div>
+                
+                {fix && fix.status === 'pending' && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleReviewAction(lineKey, 'reject')}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <XIcon className="w-4 h-4 mr-1" />
+                      Reject
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleReviewAction(lineKey, 'accept')}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Check className="w-4 h-4 mr-1" />
+                      Accept
+                    </Button>
+                  </div>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                {changeInfo.type !== 'added' && (
+                  <div>
+                    <div className="text-sm font-medium text-red-600 mb-2">Original</div>
+                    <div className="bg-red-50 border border-red-200 p-3 rounded font-mono text-sm dark:bg-red-950/20 dark:border-red-800">
+                      {changeInfo.type === 'deleted' ? (
+                        <span className="text-red-600">- {changeInfo.originalContent}</span>
+                      ) : (
+                        changeInfo.originalContent || <span className="text-muted-foreground">(empty line)</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {changeInfo.type !== 'deleted' && (
+                  <div>
+                    <div className="text-sm font-medium text-green-600 mb-2">Fixed</div>
+                    <div className="bg-green-50 border border-green-200 p-3 rounded font-mono text-sm dark:bg-green-950/20 dark:border-green-800">
+                      <span className="text-green-600">+ {changeInfo.fixedContent}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {changeInfo.type === 'deleted' && (
+                  <div>
+                    <div className="text-sm font-medium text-gray-600 mb-2">Result</div>
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded font-mono text-sm dark:bg-gray-950/20 dark:border-gray-800">
+                      <span className="text-gray-600">(line deleted)</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderCodeBlock = (code: string, title: string, isOriginal?: boolean) => (
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 p-3 border-b bg-muted">
@@ -447,12 +583,19 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           )}
 
           {/* Code Diff View */}
-          <Tabs defaultValue="diff" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+          <Tabs defaultValue="inline" className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="inline">Inline Review</TabsTrigger>
               <TabsTrigger value="diff">Diff View</TabsTrigger>
               <TabsTrigger value="original">Original Code</TabsTrigger>
               <TabsTrigger value="fixed">Fixed Code (Accepted Changes)</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="inline" className="mt-4">
+              <div className="h-[500px] overflow-auto">
+                {renderInlineDiffView()}
+              </div>
+            </TabsContent>
 
             <TabsContent value="diff" className="mt-4">
               <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">

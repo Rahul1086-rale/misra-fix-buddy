@@ -664,6 +664,21 @@ async def navigate_review(request: NavigationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/code-snippets/{project_id}")
+async def get_code_snippets(project_id: str):
+    """Get code snippets for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        fixed_snippets = session.get('fixed_snippets', {})
+        
+        return fixed_snippets
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/review/reset/{project_id}")
 async def reset_review(project_id: str):
     """Reset all review decisions for a project"""

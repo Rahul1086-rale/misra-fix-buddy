@@ -245,6 +245,12 @@ class ApiClient {
     });
   }
 
+  async getCodeSnippets(projectId: string): Promise<ApiResponse<Record<string, string>>> {
+    return this.request(`/code-snippets/${projectId}`, {
+      method: 'GET',
+    });
+  }
+
   async applyAcceptedFixes(projectId: string): Promise<ApiResponse<{ fixedFilePath: string }>> {
     return this.request('/process/apply-accepted-fixes', {
       method: 'POST',
