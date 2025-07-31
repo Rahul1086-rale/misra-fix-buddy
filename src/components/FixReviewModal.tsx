@@ -126,13 +126,19 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         }
         
         // Auto-advance to next pending fix
-        const nextPendingIndex = fixes.findIndex((fix, index) => 
-          index > currentFixIndex && fix.status === 'pending'
+        const updatedFixes = fixes.map(fix => 
+          fix.line_key === line_key 
+            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
+            : fix
         );
         
-        if (nextPendingIndex !== -1) {
-          setCurrentFixIndex(nextPendingIndex);
-          await apiClient.navigateReview(state.projectId, nextPendingIndex);
+        const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+        if (nextPendingFix) {
+          const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+          if (nextIndex !== -1) {
+            setCurrentFixIndex(nextIndex);
+            await apiClient.navigateReview(state.projectId, nextIndex);
+          }
         }
         
         toast({
@@ -152,6 +158,78 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       toast({
         title: "Error",
         description: `Failed to ${action} fix`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleGroupReviewAction = async (lineKeys: string[], action: 'accept' | 'reject') => {
+    if (!state.projectId || lineKeys.length === 0) return;
+    
+    try {
+      // Process all line keys in the group
+      const promises = lineKeys.map(lineKey => 
+        apiClient.reviewAction(state.projectId!, lineKey, action)
+      );
+      
+      const responses = await Promise.all(promises);
+      const allSuccessful = responses.every(response => response.success);
+      
+      if (allSuccessful) {
+        // Update local state for all lines in the group
+        setFixes(prev => prev.map(fix => 
+          lineKeys.includes(fix.line_key)
+            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
+            : fix
+        ));
+        
+        // Update summary
+        if (summary) {
+          const newSummary = { ...summary };
+          const changeCount = lineKeys.length;
+          if (action === 'accept') {
+            newSummary.accepted_count += changeCount;
+            newSummary.pending_count -= changeCount;
+          } else {
+            newSummary.rejected_count += changeCount;
+            newSummary.pending_count -= changeCount;
+          }
+          setSummary(newSummary);
+        }
+        
+        // Auto-advance to next pending fix
+        const updatedFixes = fixes.map(fix => 
+          lineKeys.includes(fix.line_key)
+            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
+            : fix
+        );
+        
+        const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+        if (nextPendingFix) {
+          const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+          if (nextIndex !== -1) {
+            setCurrentFixIndex(nextIndex);
+            await apiClient.navigateReview(state.projectId, nextIndex);
+          }
+        }
+        
+        toast({
+          title: "Success",
+          description: `${lineKeys.length} fix(es) ${action}ed successfully`,
+        });
+        
+        // Reload diff to show updated changes
+        const diffResponse = await apiClient.getDiff(state.projectId);
+        if (diffResponse.success && diffResponse.data) {
+          setOriginalCode(diffResponse.data.original);
+          setFixedCode(diffResponse.data.fixed);
+          setHighlightData(diffResponse.data.highlight);
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: `Failed to ${action} fixes`,
         variant: "destructive",
       });
     }
@@ -261,12 +339,31 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }, 10);
   };
 
+  // Group consecutive line changes for better UX
+  const getLineGroups = () => {
+    const groups: { [key: string]: string[] } = {};
+    
+    Object.keys(codeSnippets).forEach(lineKey => {
+      const baseLineMatch = lineKey.match(/^(\d+)/);
+      if (baseLineMatch) {
+        const baseLine = baseLineMatch[1];
+        if (!groups[baseLine]) {
+          groups[baseLine] = [];
+        }
+        groups[baseLine].push(lineKey);
+      }
+    });
+    
+    return groups;
+  };
+
   const highlightDifferencesWithActions = (code: string, isOriginal: boolean) => {
     if (!originalCode || !fixedCode || !highlightData) return code;
     
     const codeLines = code.split('\n');
     const changedLines = new Set<number>();
     const addedLines = new Set<number>();
+    const lineGroups = getLineGroups();
     
     if (isOriginal) {
       highlightData.changed_lines?.forEach((lineNum: number) => {
@@ -284,11 +381,22 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return codeLines.map((line, index) => {
       let className = '';
       const actualLineNumber = index + 1;
-      
-      // Find corresponding fix for this line
       const lineKey = actualLineNumber.toString();
-      const lineKeyWithSuffix = Object.keys(codeSnippets).find(key => key.startsWith(lineKey));
-      const fix = fixes.find(f => f.line_key === lineKey || f.line_key === lineKeyWithSuffix);
+      
+      // Find all related line keys for this line (including suffixes like 93a, 93b)
+      const relatedLineKeys = lineGroups[lineKey] || [];
+      const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
+      const primaryFix = allRelatedFixes[0];
+      
+      // Check if any related line has actual changes
+      const hasActualChanges = relatedLineKeys.some(key => {
+        const changeType = getLineChangeType(key, originalCode.split('\n'));
+        return changeType.type !== 'unchanged';
+      });
+      
+      // Check if this is a deleted line (exists in original but not in fixed)
+      const isDeletedLine = isOriginal && changedLines.has(index) && 
+        !fixedCode.split('\n')[index] && codeSnippets[lineKey];
       
       if (addedLines.has(index)) {
         className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
@@ -298,28 +406,29 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
       }
       
-      // Check if this line has actual changes by comparing with original
-      const originalLines = originalCode.split('\n');
-      const hasActualChange = fix && codeSnippets[fix.line_key] && 
-        getLineChangeType(fix.line_key, originalLines).type !== 'unchanged';
+      // Show buttons for deleted lines in original view or changed lines in fixed view
+      const showButtons = (isOriginal && isDeletedLine) || 
+        (!isOriginal && hasActualChanges && !isDeletedLine);
       
       return (
         <div key={index} className={`${className} px-2 py-0.5 group relative`}>
           <div className="flex items-center justify-between">
-            <span className="flex-1 font-mono text-xs">{line}</span>
-            {!isOriginal && hasActualChange && fix && fix.status === 'pending' && (
+            <span className="flex-1 font-mono text-xs">
+              {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
+            </span>
+            {showButtons && primaryFix && primaryFix.status === 'pending' && (
               <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2 shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleReviewAction(fix.line_key, 'reject')}
+                  onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
                   className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
                 >
                   <XIcon className="w-3 h-3" />
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => handleReviewAction(fix.line_key, 'accept')}
+                  onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
                   className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
                 >
                   <Check className="w-3 h-3" />
