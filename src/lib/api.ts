@@ -257,6 +257,47 @@ class ApiClient {
       body: JSON.stringify({ projectId }),
     });
   }
+
+  async acceptFix(projectId: string, lineKeys: string[]): Promise<ApiResponse<{ success: boolean; message: string }>> {
+    return this.request(`/review/accept/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(lineKeys),
+    });
+  }
+
+  async rejectFix(projectId: string, lineKeys: string[]): Promise<ApiResponse<{ success: boolean; message: string }>> {
+    return this.request(`/review/reject/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(lineKeys),
+    });
+  }
+
+  async resetFix(projectId: string, lineKeys: string[]): Promise<ApiResponse<{ success: boolean; message: string }>> {
+    return this.request(`/review/reset/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(lineKeys),
+    });
+  }
+
+  async getReviewFixes(projectId: string): Promise<ApiResponse<{
+    fixes: Array<{
+      index: number;
+      line_key: string;
+      content: string;
+      status: 'accepted' | 'rejected' | 'pending';
+    }>;
+    summary: {
+      total_fixes: number;
+      accepted_count: number;
+      rejected_count: number;
+      pending_count: number;
+      current_review_index: number;
+    };
+  }>> {
+    return this.request(`/review/fixes/${projectId}`, {
+      method: 'GET',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
