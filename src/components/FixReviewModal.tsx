@@ -261,7 +261,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }, 10);
   };
 
-  const highlightDifferences = (code: string, isOriginal: boolean) => {
+  const highlightDifferencesWithActions = (code: string, isOriginal: boolean) => {
     if (!originalCode || !fixedCode || !highlightData) return code;
     
     const codeLines = code.split('\n');
@@ -283,6 +283,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     return codeLines.map((line, index) => {
       let className = '';
+      const actualLineNumber = index + 1;
+      
+      // Find corresponding fix for this line
+      const lineKey = actualLineNumber.toString();
+      const lineKeyWithSuffix = Object.keys(codeSnippets).find(key => key.startsWith(lineKey));
+      const fix = fixes.find(f => f.line_key === lineKey || f.line_key === lineKeyWithSuffix);
       
       if (addedLines.has(index)) {
         className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
@@ -292,9 +298,35 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
       }
       
+      // Check if this line has actual changes by comparing with original
+      const originalLines = originalCode.split('\n');
+      const hasActualChange = fix && codeSnippets[fix.line_key] && 
+        getLineChangeType(fix.line_key, originalLines).type !== 'unchanged';
+      
       return (
-        <div key={index} className={`${className} px-2 py-0.5`}>
-          {line}
+        <div key={index} className={`${className} px-2 py-0.5 group relative`}>
+          <div className="flex items-center justify-between">
+            <span className="flex-1 font-mono text-xs">{line}</span>
+            {!isOriginal && hasActualChange && fix && fix.status === 'pending' && (
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleReviewAction(fix.line_key, 'reject')}
+                  className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                >
+                  <XIcon className="w-3 h-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleReviewAction(fix.line_key, 'accept')}
+                  className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
+                >
+                  <Check className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       );
     });
@@ -446,7 +478,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             {code ? (
               isOriginal !== undefined ? (
                 <div className="space-y-0">
-                  {highlightDifferences(code, isOriginal)}
+                  {highlightDifferencesWithActions(code, isOriginal)}
                 </div>
               ) : (
                 code
@@ -464,123 +496,26 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl max-h-[90vh]">
+      <DialogContent className="max-w-7xl max-h-[90vh] w-[95vw] p-3 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Eye className="w-5 h-5" />
-            Code Fix Review
+          <DialogTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Eye className="w-5 h-5" />
+              Code Fix Review
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetReview}
+              className="flex items-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reset
+            </Button>
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Review Summary */}
-          {summary && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center justify-between">
-                  Review Progress
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={resetReview}
-                    className="flex items-center gap-2"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    Reset
-                  </Button>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-4 gap-4 text-center">
-                  <div>
-                    <div className="text-2xl font-bold">{summary.total_fixes}</div>
-                    <div className="text-sm text-muted-foreground">Total Fixes</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-green-600">{summary.accepted_count}</div>
-                    <div className="text-sm text-muted-foreground">Accepted</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-red-600">{summary.rejected_count}</div>
-                    <div className="text-sm text-muted-foreground">Rejected</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-amber-600">{summary.pending_count}</div>
-                    <div className="text-sm text-muted-foreground">Pending</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Current Fix Review */}
-          {currentFix && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center justify-between">
-                  <span>Fix {currentFixIndex + 1} of {fixes.length} - Line {currentFix.line_key}</span>
-                  <Badge variant={
-                    currentFix.status === 'accepted' ? 'default' :
-                    currentFix.status === 'rejected' ? 'destructive' : 'secondary'
-                  }>
-                    {currentFix.status.charAt(0).toUpperCase() + currentFix.status.slice(1)}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="bg-muted p-3 rounded font-mono text-sm">
-                    {currentFix.content}
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigateToFix(Math.max(0, currentFixIndex - 1))}
-                        disabled={currentFixIndex === 0}
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigateToFix(Math.min(fixes.length - 1, currentFixIndex + 1))}
-                        disabled={currentFixIndex === fixes.length - 1}
-                      >
-                        Next
-                        <ChevronRight className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleReviewAction(currentFix.line_key, 'reject')}
-                        disabled={currentFix.status === 'rejected'}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <XIcon className="w-4 h-4 mr-1" />
-                        Reject
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleReviewAction(currentFix.line_key, 'accept')}
-                        disabled={currentFix.status === 'accepted'}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <Check className="w-4 h-4 mr-1" />
-                        Accept
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {/* Code Diff View */}
           <Tabs defaultValue="inline" className="w-full">
