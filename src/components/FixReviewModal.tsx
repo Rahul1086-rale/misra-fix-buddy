@@ -106,11 +106,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       
       if (response.success) {
         // Update local state
-        setFixes(prev => prev.map(fix => 
+        const updatedFixes = fixes.map(fix => 
           fix.line_key === line_key 
-            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
+            ? { ...fix, status: action === 'accept' ? 'accepted' as const : 'rejected' as const }
             : fix
-        ));
+        );
+        setFixes(updatedFixes);
         
         // Update summary
         if (summary) {
@@ -125,22 +126,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setSummary(newSummary);
         }
         
-        // Auto-advance to next pending fix
-        const updatedFixes = fixes.map(fix => 
-          fix.line_key === line_key 
-            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
-            : fix
-        );
-        
-        const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
-        if (nextPendingFix) {
-          const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-          if (nextIndex !== -1) {
-            setCurrentFixIndex(nextIndex);
-            await apiClient.navigateReview(state.projectId, nextIndex);
-          }
-        }
-        
         toast({
           title: "Success",
           description: `Fix ${action}ed successfully`,
@@ -153,6 +138,20 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setFixedCode(diffResponse.data.fixed);
           setHighlightData(diffResponse.data.highlight);
         }
+        
+        // Auto-advance to next pending fix
+        setTimeout(() => {
+          const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+          if (nextPendingFix) {
+            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+            if (nextIndex !== -1) {
+              setCurrentFixIndex(nextIndex);
+              if (state.projectId) {
+                apiClient.navigateReview(state.projectId, nextIndex);
+              }
+            }
+          }
+        }, 100);
       }
     } catch (error) {
       toast({
@@ -177,11 +176,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       
       if (allSuccessful) {
         // Update local state for all lines in the group
-        setFixes(prev => prev.map(fix => 
+        const updatedFixes = fixes.map(fix => 
           lineKeys.includes(fix.line_key)
-            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
+            ? { ...fix, status: action === 'accept' ? 'accepted' as const : 'rejected' as const }
             : fix
-        ));
+        );
+        setFixes(updatedFixes);
         
         // Update summary
         if (summary) {
@@ -197,22 +197,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setSummary(newSummary);
         }
         
-        // Auto-advance to next pending fix
-        const updatedFixes = fixes.map(fix => 
-          lineKeys.includes(fix.line_key)
-            ? { ...fix, status: action === 'accept' ? 'accepted' : 'rejected' }
-            : fix
-        );
-        
-        const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
-        if (nextPendingFix) {
-          const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-          if (nextIndex !== -1) {
-            setCurrentFixIndex(nextIndex);
-            await apiClient.navigateReview(state.projectId, nextIndex);
-          }
-        }
-        
         toast({
           title: "Success",
           description: `${lineKeys.length} fix(es) ${action}ed successfully`,
@@ -225,11 +209,78 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setFixedCode(diffResponse.data.fixed);
           setHighlightData(diffResponse.data.highlight);
         }
+        
+        // Auto-advance to next pending fix
+        setTimeout(() => {
+          const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+          if (nextPendingFix) {
+            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+            if (nextIndex !== -1) {
+              setCurrentFixIndex(nextIndex);
+              if (state.projectId) {
+                apiClient.navigateReview(state.projectId, nextIndex);
+              }
+            }
+          }
+        }, 100);
       }
     } catch (error) {
       toast({
         title: "Error",
         description: `Failed to ${action} fixes`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSingleLineReset = async (lineKey: string) => {
+    if (!state.projectId) return;
+    
+    try {
+      // For reset, we'll call reject then accept to reset to pending
+      // Since API doesn't have direct reset, we simulate it
+      const currentFix = fixes.find(fix => fix.line_key === lineKey);
+      if (!currentFix) return;
+      
+      // Just update local state directly to pending
+      const updatedFixes = fixes.map(fix => 
+        fix.line_key === lineKey 
+          ? { ...fix, status: 'pending' as const }
+          : fix
+      );
+      setFixes(updatedFixes);
+      
+      // Update summary
+      if (summary) {
+        const currentFix = fixes.find(fix => fix.line_key === lineKey);
+        if (currentFix && currentFix.status !== 'pending') {
+          const newSummary = { ...summary };
+          if (currentFix.status === 'accepted') {
+            newSummary.accepted_count -= 1;
+          } else {
+            newSummary.rejected_count -= 1;
+          }
+          newSummary.pending_count += 1;
+          setSummary(newSummary);
+        }
+      }
+      
+      toast({
+        title: "Success",
+        description: "Fix reset to pending status",
+      });
+      
+      // Reload diff to show updated changes
+      const diffResponse = await apiClient.getDiff(state.projectId);
+      if (diffResponse.success && diffResponse.data) {
+        setOriginalCode(diffResponse.data.original);
+        setFixedCode(diffResponse.data.fixed);
+        setHighlightData(diffResponse.data.highlight);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reset fix",
         variant: "destructive",
       });
     }
@@ -416,23 +467,44 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             <span className="flex-1 font-mono text-xs">
               {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
             </span>
-            {showButtons && primaryFix && primaryFix.status === 'pending' && (
+            {showButtons && primaryFix && (
               <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
-                  className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
-                >
-                  <XIcon className="w-3 h-3" />
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
-                  className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
-                >
-                  <Check className="w-3 h-3" />
-                </Button>
+                {primaryFix.status === 'pending' ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
+                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
+                      className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
+                    >
+                      <Check className="w-3 h-3" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Badge 
+                      variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
+                      className="text-xs h-6"
+                    >
+                      {primaryFix.status}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSingleLineReset(primaryFix.line_key)}
+                      className="h-6 px-2 text-xs"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </Button>
+                  </>
+                )}
               </div>
             )}
           </div>
