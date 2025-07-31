@@ -141,14 +141,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix
         setTimeout(() => {
-          const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+          const nextPendingFix = updatedFixes.find((fix, index) => 
+            index > currentFixIndex && fix.status === 'pending'
+          );
           if (nextPendingFix) {
             const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-            if (nextIndex !== -1) {
+            if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
               setCurrentFixIndex(nextIndex);
               if (state.projectId) {
                 apiClient.navigateReview(state.projectId, nextIndex);
               }
+              scrollToFix(nextPendingFix);
             }
           }
         }, 100);
@@ -212,14 +215,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix
         setTimeout(() => {
-          const nextPendingFix = updatedFixes.find(fix => fix.status === 'pending');
+          const nextPendingFix = updatedFixes.find((fix, index) => 
+            index > currentFixIndex && fix.status === 'pending'
+          );
           if (nextPendingFix) {
             const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-            if (nextIndex !== -1) {
+            if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
               setCurrentFixIndex(nextIndex);
               if (state.projectId) {
                 apiClient.navigateReview(state.projectId, nextIndex);
               }
+              scrollToFix(nextPendingFix);
             }
           }
         }, 100);
@@ -237,12 +243,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     if (!state.projectId) return;
     
     try {
-      // For reset, we'll call reject then accept to reset to pending
-      // Since API doesn't have direct reset, we simulate it
       const currentFix = fixes.find(fix => fix.line_key === lineKey);
-      if (!currentFix) return;
+      if (!currentFix || currentFix.status === 'pending') return;
       
-      // Just update local state directly to pending
+      // Call the backend to properly reset the line
+      // We'll use a temporary approach - call opposite action then original to reset
+      const oppositeAction = currentFix.status === 'accepted' ? 'reject' : 'accept';
+      const originalAction = currentFix.status === 'accepted' ? 'accept' : 'reject';
+      await apiClient.reviewAction(state.projectId, lineKey, oppositeAction);
+      await apiClient.reviewAction(state.projectId, lineKey, originalAction);
+      
+      // Update local state to pending
       const updatedFixes = fixes.map(fix => 
         fix.line_key === lineKey 
           ? { ...fix, status: 'pending' as const }
@@ -252,17 +263,14 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       
       // Update summary
       if (summary) {
-        const currentFix = fixes.find(fix => fix.line_key === lineKey);
-        if (currentFix && currentFix.status !== 'pending') {
-          const newSummary = { ...summary };
-          if (currentFix.status === 'accepted') {
-            newSummary.accepted_count -= 1;
-          } else {
-            newSummary.rejected_count -= 1;
-          }
-          newSummary.pending_count += 1;
-          setSummary(newSummary);
+        const newSummary = { ...summary };
+        if (currentFix.status === 'accepted') {
+          newSummary.accepted_count -= 1;
+        } else {
+          newSummary.rejected_count -= 1;
         }
+        newSummary.pending_count += 1;
+        setSummary(newSummary);
       }
       
       toast({
@@ -270,13 +278,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         description: "Fix reset to pending status",
       });
       
-      // Reload diff to show updated changes
-      const diffResponse = await apiClient.getDiff(state.projectId);
-      if (diffResponse.success && diffResponse.data) {
-        setOriginalCode(diffResponse.data.original);
-        setFixedCode(diffResponse.data.fixed);
-        setHighlightData(diffResponse.data.highlight);
-      }
+      // Reload data to sync with backend
+      await loadReviewData();
     } catch (error) {
       toast({
         title: "Error",
@@ -358,12 +361,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             description: "Fixed file with accepted changes downloaded successfully" 
           });
           onClose();
+        } else {
+          throw new Error('Failed to generate download file');
         }
+      } else {
+        throw new Error(mergeResponse.error || 'Failed to apply accepted fixes');
       }
     } catch (error) {
+      console.error('Download error:', error);
       toast({
         title: "Error",
-        description: "Failed to download file",
+        description: error instanceof Error ? error.message : "Failed to download file",
         variant: "destructive",
       });
     } finally {
