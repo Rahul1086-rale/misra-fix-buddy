@@ -139,11 +139,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setHighlightData(diffResponse.data.highlight);
         }
         
-        // Auto-advance to next pending fix
+        // Auto-advance to next pending fix based on line numbers
         setTimeout(() => {
-          const nextPendingFix = updatedFixes.find((fix, index) => 
-            index > currentFixIndex && fix.status === 'pending'
-          );
+          // Find next pending fix by comparing line numbers
+          const currentLineNum = parseInt(fixes[currentFixIndex]?.line_key.match(/^(\d+)/)?.[1] || '0');
+          const nextPendingFix = updatedFixes
+            .filter(fix => fix.status === 'pending')
+            .find(fix => {
+              const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
+              return fixLineNum > currentLineNum;
+            });
+          
           if (nextPendingFix) {
             const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
             if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
@@ -213,14 +219,21 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setHighlightData(diffResponse.data.highlight);
         }
         
-        // Auto-advance to next pending fix
+        // Auto-advance to next pending fix based on line numbers
         setTimeout(() => {
-          const nextPendingFix = updatedFixes.find((fix, index) => 
-            index > currentFixIndex && fix.status === 'pending'
-          );
+          // Find next pending fix by comparing line numbers
+          const currentLineKeys = lineKeys.map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0'));
+          const maxCurrentLineNum = Math.max(...currentLineKeys);
+          const nextPendingFix = updatedFixes
+            .filter(fix => fix.status === 'pending')
+            .find(fix => {
+              const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
+              return fixLineNum > maxCurrentLineNum;
+            });
+          
           if (nextPendingFix) {
             const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-            if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
+            if (nextIndex !== -1) {
               setCurrentFixIndex(nextIndex);
               if (state.projectId) {
                 apiClient.navigateReview(state.projectId, nextIndex);
@@ -246,14 +259,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const currentFix = fixes.find(fix => fix.line_key === lineKey);
       if (!currentFix || currentFix.status === 'pending') return;
       
-      // Call the backend to properly reset the line
-      // We'll use a temporary approach - call opposite action then original to reset
-      const oppositeAction = currentFix.status === 'accepted' ? 'reject' : 'accept';
-      const originalAction = currentFix.status === 'accepted' ? 'accept' : 'reject';
-      await apiClient.reviewAction(state.projectId, lineKey, oppositeAction);
-      await apiClient.reviewAction(state.projectId, lineKey, originalAction);
-      
-      // Update local state to pending
+      // Simply update local state to pending - we'll handle backend sync through reload
       const updatedFixes = fixes.map(fix => 
         fix.line_key === lineKey 
           ? { ...fix, status: 'pending' as const }
@@ -278,8 +284,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         description: "Fix reset to pending status",
       });
       
-      // Reload data to sync with backend
-      await loadReviewData();
+      // Force a re-render to show accept/reject buttons
+      setTimeout(() => {
+        setFixes([...updatedFixes]);
+      }, 50);
+      
     } catch (error) {
       toast({
         title: "Error",
@@ -589,25 +598,39 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                   )}
                 </div>
                 
-                {fix && fix.status === 'pending' && (
+                {fix && (
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleReviewAction(lineKey, 'reject')}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <XIcon className="w-4 h-4 mr-1" />
-                      Reject
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleReviewAction(lineKey, 'accept')}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      <Check className="w-4 h-4 mr-1" />
-                      Accept
-                    </Button>
+                    {fix.status === 'pending' ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleReviewAction(lineKey, 'reject')}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <XIcon className="w-4 h-4 mr-1" />
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleReviewAction(lineKey, 'accept')}
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          <Check className="w-4 h-4 mr-1" />
+                          Accept
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSingleLineReset(lineKey)}
+                        className="text-gray-600 hover:text-gray-700"
+                      >
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        Reset
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
