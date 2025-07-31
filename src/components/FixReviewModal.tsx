@@ -141,29 +141,24 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix based on line numbers
         setTimeout(() => {
-          // Find next pending fix after current line number
+          // Find next pending fix by comparing line numbers
           const currentLineNum = parseInt(fixes[currentFixIndex]?.line_key.match(/^(\d+)/)?.[1] || '0');
-          let nextPendingIndex = -1;
-          
-          // First, look for pending fixes with higher line numbers
-          for (let i = 0; i < updatedFixes.length; i++) {
-            const fix = updatedFixes[i];
-            if (fix.status === 'pending') {
+          const nextPendingFix = updatedFixes
+            .filter(fix => fix.status === 'pending')
+            .find(fix => {
               const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
-              if (fixLineNum > currentLineNum) {
-                nextPendingIndex = i;
-                break;
+              return fixLineNum > currentLineNum;
+            });
+          
+          if (nextPendingFix) {
+            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+            if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
+              setCurrentFixIndex(nextIndex);
+              if (state.projectId) {
+                apiClient.navigateReview(state.projectId, nextIndex);
               }
+              scrollToFix(nextPendingFix);
             }
-          }
-          
-          // If no pending fix found after current line, find first pending fix
-          if (nextPendingIndex === -1) {
-            nextPendingIndex = updatedFixes.findIndex(fix => fix.status === 'pending');
-          }
-          
-          if (nextPendingIndex !== -1 && nextPendingIndex !== currentFixIndex) {
-            setCurrentFixIndex(nextPendingIndex);
           }
         }, 100);
       }
@@ -226,30 +221,25 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix based on line numbers
         setTimeout(() => {
-          // Find next pending fix after current line numbers
+          // Find next pending fix by comparing line numbers
           const currentLineKeys = lineKeys.map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0'));
           const maxCurrentLineNum = Math.max(...currentLineKeys);
-          let nextPendingIndex = -1;
-          
-          // First, look for pending fixes with higher line numbers
-          for (let i = 0; i < updatedFixes.length; i++) {
-            const fix = updatedFixes[i];
-            if (fix.status === 'pending') {
+          const nextPendingFix = updatedFixes
+            .filter(fix => fix.status === 'pending')
+            .find(fix => {
               const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
-              if (fixLineNum > maxCurrentLineNum) {
-                nextPendingIndex = i;
-                break;
+              return fixLineNum > maxCurrentLineNum;
+            });
+          
+          if (nextPendingFix) {
+            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
+            if (nextIndex !== -1) {
+              setCurrentFixIndex(nextIndex);
+              if (state.projectId) {
+                apiClient.navigateReview(state.projectId, nextIndex);
               }
+              scrollToFix(nextPendingFix);
             }
-          }
-          
-          // If no pending fix found after current line, find first pending fix
-          if (nextPendingIndex === -1) {
-            nextPendingIndex = updatedFixes.findIndex(fix => fix.status === 'pending');
-          }
-          
-          if (nextPendingIndex !== -1) {
-            setCurrentFixIndex(nextPendingIndex);
           }
         }, 100);
       }
@@ -269,43 +259,36 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const currentFix = fixes.find(fix => fix.line_key === lineKey);
       if (!currentFix || currentFix.status === 'pending') return;
       
-      // Call backend to reset the status
-      const response = await apiClient.resetFix(state.projectId, [lineKey]);
+      // Simply update local state to pending - we'll handle backend sync through reload
+      const updatedFixes = fixes.map(fix => 
+        fix.line_key === lineKey 
+          ? { ...fix, status: 'pending' as const }
+          : fix
+      );
+      setFixes(updatedFixes);
       
-      if (response.success) {
-        // Update local state to pending
-        const updatedFixes = fixes.map(fix => 
-          fix.line_key === lineKey 
-            ? { ...fix, status: 'pending' as const }
-            : fix
-        );
-        setFixes(updatedFixes);
-        
-        // Update summary
-        if (summary) {
-          const newSummary = { ...summary };
-          if (currentFix.status === 'accepted') {
-            newSummary.accepted_count -= 1;
-          } else {
-            newSummary.rejected_count -= 1;
-          }
-          newSummary.pending_count += 1;
-          setSummary(newSummary);
+      // Update summary
+      if (summary) {
+        const newSummary = { ...summary };
+        if (currentFix.status === 'accepted') {
+          newSummary.accepted_count -= 1;
+        } else {
+          newSummary.rejected_count -= 1;
         }
-        
-        // Reload diff to show updated changes
-        const diffResponse = await apiClient.getDiff(state.projectId);
-        if (diffResponse.success && diffResponse.data) {
-          setOriginalCode(diffResponse.data.original);
-          setFixedCode(diffResponse.data.fixed);
-          setHighlightData(diffResponse.data.highlight);
-        }
-        
-        toast({
-          title: "Success",
-          description: "Fix reset to pending status",
-        });
+        newSummary.pending_count += 1;
+        setSummary(newSummary);
       }
+      
+      toast({
+        title: "Success",
+        description: "Fix reset to pending status",
+      });
+      
+      // Force a re-render to show accept/reject buttons
+      setTimeout(() => {
+        setFixes([...updatedFixes]);
+      }, 50);
+      
     } catch (error) {
       toast({
         title: "Error",

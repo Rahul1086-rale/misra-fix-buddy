@@ -106,41 +106,126 @@ class ApplyFixesResponse(BaseModel):
 class ChatResponse(BaseModel):
     response: str
 
-# Initialize Vertex AI on startup
-print("Initializing Vertex AI...")
-init_vertex_ai()
-print("✅ Vertex AI initialized successfully!")
+class SettingsResponse(BaseModel):
+    success: bool
+    message: str
 
-@app.post("/api/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile = File(...)):
+class DiffResponse(BaseModel):
+    original: str
+    fixed: str
+    has_changes: bool
+    highlight: dict = {}
+
+class ReviewActionRequest(BaseModel):
+    projectId: str
+    line_key: str
+    action: str  # 'accept' or 'reject'
+
+class NavigationRequest(BaseModel):
+    projectId: str
+    index: int
+
+class ReviewStateResponse(BaseModel):
+    fixes: List[Dict[str, Any]]
+    summary: Dict[str, Any]
+
+# Initialize Vertex AI on startup
+@app.on_event("startup")
+async def startup_event():
+    init_vertex_ai()
+
+# Settings endpoints
+@app.get("/api/settings", response_model=ModelSettings)
+async def get_settings():
+    """Get current model settings"""
+    return ModelSettings(**model_settings)
+
+@app.post("/api/settings", response_model=SettingsResponse)
+async def save_settings(settings: ModelSettings):
+    """Save model settings"""
     try:
-        # Validate file extension
+        global model_settings
+        model_settings = settings.dict()
+        
+        # Optional: Save to file for persistence
+        settings_file = os.path.join(UPLOAD_FOLDER, 'model_settings.json')
+        with open(settings_file, 'w') as f:
+            json.dump(model_settings, f, indent=2)
+        
+        return SettingsResponse(
+            success=True,
+            message="Settings saved successfully"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+
+@app.post("/api/upload/cpp-file", response_model=UploadResponse)
+async def upload_cpp_file(
+    file: UploadFile = File(...),
+    projectId: str = Form(...)
+):
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file selected")
+        
         if not allowed_file(file.filename):
-            raise HTTPException(status_code=400, detail="Invalid file extension")
+            raise HTTPException(status_code=400, detail="Invalid file type")
         
-        # Create project ID (timestamp + random)
-        project_id = str(uuid.uuid4())
+        # Save uploaded file
+        filename = file.filename
+        file_path = os.path.join(UPLOAD_FOLDER, f"{projectId}_{filename}")
         
-        # Save original file
-        file_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{file.filename}")
         with open(file_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
         
-        # Store session data
-        sessions[project_id] = {
-            'original_file': file_path,
-            'original_filename': file.filename,
-            'project_id': project_id
+        # Initialize session
+        sessions[projectId] = {
+            'cpp_file': file_path,
+            'original_filename': filename
         }
         
-        return UploadResponse(filePath=file_path, fileName=file.filename)
+        return UploadResponse(
+            filePath=file_path,
+            fileName=filename
+        )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/process/line-numbers", response_model=ProcessResponse)
-async def process_line_numbers(request: LineNumbersRequest):
+@app.post("/api/upload/misra-report")
+async def upload_misra_report(
+    file: UploadFile = File(...),
+    projectId: str = Form(...),
+    targetFile: str = Form(...)
+):
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file selected")
+        
+        # Save Excel file
+        filename = file.filename
+        excel_path = os.path.join(UPLOAD_FOLDER, f"{projectId}_report_{filename}")
+        
+        with open(excel_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Extract violations
+        violations = extract_violations_for_file(excel_path, targetFile)
+        
+        # Store in session
+        if projectId in sessions:
+            sessions[projectId]['excel_file'] = excel_path
+            sessions[projectId]['violations'] = violations
+        
+        return violations
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/process/add-line-numbers", response_model=ProcessResponse)
+async def process_add_line_numbers(request: LineNumbersRequest):
     try:
         project_id = request.projectId
         
@@ -148,23 +233,25 @@ async def process_line_numbers(request: LineNumbersRequest):
             raise HTTPException(status_code=404, detail="Project not found")
         
         session = sessions[project_id]
-        original_file = session['original_file']
+        input_file = session['cpp_file']
         
-        # Add line numbers
-        numbered_filename = f"numbered_{session['original_filename']}"
-        numbered_file_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{numbered_filename}")
-        add_line_numbers(original_file, numbered_file_path)
+        # Create numbered file with .txt extension
+        original_name = Path(session['original_filename']).stem
+        numbered_filename = f"numbered_{original_name}.txt"
+        numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{numbered_filename}")
         
-        # Store numbered file path
-        sessions[project_id]['numbered_file'] = numbered_file_path
+        add_line_numbers(input_file, numbered_path)
         
-        return ProcessResponse(numberedFilePath=numbered_file_path)
+        # Update session
+        sessions[project_id]['numbered_file'] = numbered_path
+        
+        return ProcessResponse(numberedFilePath=numbered_path)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/process/first-prompt", response_model=GeminiResponse)
-async def process_first_prompt(request: FirstPromptRequest):
+@app.post("/api/gemini/first-prompt", response_model=GeminiResponse)
+async def gemini_first_prompt(request: FirstPromptRequest):
     try:
         project_id = request.projectId
         
@@ -174,11 +261,11 @@ async def process_first_prompt(request: FirstPromptRequest):
         session = sessions[project_id]
         numbered_file = session['numbered_file']
         
-        # Load C++ file and send to Gemini
-        file_content = load_cpp_file(numbered_file)
+        # Load numbered file content
+        numbered_content = load_cpp_file(numbered_file)
         
-        # Start Gemini chat session with model settings
-        chat_session = start_chat(
+        # Start chat session with current model settings
+        chat = start_chat(
             model_name=model_settings['model_name'],
             temperature=model_settings['temperature'],
             top_p=model_settings['top_p'],
@@ -186,67 +273,108 @@ async def process_first_prompt(request: FirstPromptRequest):
             safety_settings=model_settings['safety_settings']
         )
         
-        # Store chat session
-        chat_sessions[project_id] = chat_session
+        # Send first prompt
+        response = send_file_intro(chat, numbered_content)
         
-        # Send file introduction to Gemini
-        response = send_file_intro(chat_session, file_content)
+        # Check if response is None (blocked by safety filters)
+        if response is None:
+            raise HTTPException(
+                status_code=422, 
+                detail="Response was blocked by safety filters. Please try with different content or contact support."
+            )
+        
+        # Store chat session
+        chat_sessions[project_id] = chat
         
         return GeminiResponse(response=response)
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/process/fix-violations", response_model=FixViolationsResponse)
-async def process_fix_violations(request: FixViolationsRequest):
+import logging
+import traceback
+
+@app.post("/api/gemini/fix-violations", response_model=FixViolationsResponse)
+async def gemini_fix_violations(request: FixViolationsRequest):
     try:
-        import traceback
-        
         project_id = request.projectId
         violations = request.violations
         
-        print(f"Processing fix violations for project: {project_id}")
-        print(f"Number of violations: {len(violations)}")
+        print(f"Processing project_id: {project_id}")  # Debug
+        print(f"Number of violations: {len(violations)}")  # Debug
         
         if project_id not in chat_sessions:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
-        chat_session = chat_sessions[project_id]
+        chat = chat_sessions[project_id]
         
-        # Send violations to Gemini and get fixes
-        response = send_misra_violations(chat_session, violations)
+        # Format violations for Gemini
+        violations_text = []
+        for v in violations:
+            violations_text.append(
+                f"File: {v['file']}\n"
+                f"Path: {v['path']}\n"
+                f"Line: {v['line']}\n"
+                f"Rule: {v['misra']}\n"
+                f"Message: {v['warning']}\n"
+            )
         
-        print(f"Gemini response received, length: {len(response) if response else 0}")
+        violations_str = "\n".join(violations_text)
+        print(f"Formatted violations length: {len(violations_str)}")  # Debug
         
-        # Extract code snippets from response and save to session
+        # Send to Gemini
+        print("Sending to Gemini...")  # Debug
+        response = send_misra_violations(chat, violations_str)
+        print(f"Gemini response received: {response is not None}")  # Debug
+        
+        # Check if response is None (blocked by safety filters)
+        if response is None:
+            raise HTTPException(
+                status_code=422, 
+                detail="Response was blocked by safety filters. Please try with different content or contact support."
+            )
+        
+        # Extract code snippets
+        print("Extracting snippets...")  # Debug
         code_snippets = extract_snippets_from_response(response)
-        print(f"Extracted {len(code_snippets)} code snippets")
+        print(f"Extracted {len(code_snippets)} snippets")  # Debug
         
         # Save snippets to session
-        sessions[project_id]['fixed_snippets'] = code_snippets
-        snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
-        save_snippets_to_json(code_snippets, snippet_file)
-        sessions[project_id]['snippet_file'] = snippet_file
-        print(f"Snippets saved to: {snippet_file}")
+        if project_id in sessions:
+            print("Saving snippets to session...")  # Debug
+            sessions[project_id]['fixed_snippets'] = code_snippets
+            snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
+            save_snippets_to_json(code_snippets, snippet_file)
+            sessions[project_id]['snippet_file'] = snippet_file
+            print(f"Snippets saved to: {snippet_file}")  # Debug
+            
+            # Create temporary fixed files for immediate diff view
+            try:
+                session = sessions[project_id]
+                numbered_file = session.get('numbered_file')
+                if numbered_file:
+                    temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                        numbered_file, code_snippets, project_id, UPLOAD_FOLDER
+                    )
+                    session['temp_fixed_numbered'] = temp_fixed_numbered_path
+                    session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+                    print(f"Created temporary fixed files for project {project_id}")
+            except Exception as e:
+                print(f"Error creating temporary fixed files: {str(e)}")
         
-        # Update temporary fixed file for real-time diff view
-        session = sessions[project_id]
-        numbered_file = session.get('numbered_file')
-        if numbered_file:
-            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
-                numbered_file, code_snippets, project_id, UPLOAD_FOLDER
-            )
-            session['temp_fixed_numbered'] = temp_fixed_numbered_path
-            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
-            print(f"Temporary fixed files created for project {project_id}")
+        return FixViolationsResponse(
+            response=response,
+            codeSnippets=[{"code": snippet} for snippet in code_snippets.values()]
+        )
         
-        # Convert to list format expected by frontend
-        snippets_list = [{'lineNumber': k, 'content': v} for k, v in code_snippets.items()]
-        
-        return FixViolationsResponse(response=response, codeSnippets=snippets_list)
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error in fix_violations: {str(e)}")
+        # Add detailed error logging
+        print(f"Error in gemini_fix_violations: {str(e)}")
+        print(f"Error type: {type(e)}")
         print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
@@ -262,18 +390,11 @@ async def process_apply_fixes(request: ApplyFixesRequest):
         numbered_file = session['numbered_file']
         fixed_snippets = session.get('fixed_snippets', {})
         
-        # Apply fixes using ORIGINAL numbered file to preserve all content
-        # Get review manager to check for accepted snippets
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        
-        # Use original numbered file as base and apply only accepted fixes
-        original_numbered_file = session['numbered_file']
-        accepted_snippets = review_manager.get_accepted_snippets(fixed_snippets)
-        
+        # Apply fixes
         fixed_filename = f"fixed_{session['original_filename']}"
         fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{session['original_filename']}")
         
-        merge_fixed_snippets_into_file(original_numbered_file, accepted_snippets, fixed_numbered_path)
+        merge_fixed_snippets_into_file(numbered_file, fixed_snippets, fixed_numbered_path)
         
         # Remove line numbers for final file
         final_fixed_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{fixed_filename}")
@@ -388,147 +509,89 @@ async def get_numbered_file(project_id: str):
             raise HTTPException(status_code=404, detail="Numbered file not found")
         
         content = get_file_content(numbered_file)
-        return {"content": content}
+        if content is None:
+            raise HTTPException(status_code=500, detail="Failed to read numbered file")
+        
+        return content
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/files/fixed/{project_id}")
-async def get_fixed_file(project_id: str):
-    """Get fixed file content (showing only accepted changes)"""
+@app.get("/api/files/temp-fixed/{project_id}")
+async def get_temp_fixed_file(project_id: str):
+    """Get temporary fixed file content"""
     try:
         if project_id not in sessions:
             raise HTTPException(status_code=404, detail="Project not found")
         
         session = sessions[project_id]
         
-        # Create temporary fixed file showing only accepted changes
-        numbered_file = session.get('numbered_file')
-        all_fixed_snippets = session.get('fixed_snippets', {})
+        # Get existing temp fixed file path if it exists
+        temp_fixed_numbered_path = session.get('temp_fixed_numbered')
         
-        if not numbered_file or not all_fixed_snippets:
+        if not temp_fixed_numbered_path or not os.path.exists(temp_fixed_numbered_path):
+            # If temp file doesn't exist, create it
+            fixed_snippets = session.get('fixed_snippets', {})
+            numbered_file = session.get('numbered_file')
+            
+            if not numbered_file:
+                raise HTTPException(status_code=404, detail="Numbered file not found")
+            
+            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                numbered_file, fixed_snippets, project_id, UPLOAD_FOLDER
+            )
+            
+            # Store paths in session
+            session['temp_fixed_numbered'] = temp_fixed_numbered_path
+            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+        
+        # Return the fixed numbered content (with line numbers for diff view)
+        content = get_file_content(temp_fixed_numbered_path)
+        if content is None:
+            raise HTTPException(status_code=500, detail="Failed to read temporary fixed file")
+        
+        return content
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/diff/{project_id}", response_model=DiffResponse)
+async def get_diff(project_id: str):
+    """Get diff between original and fixed files"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        original_file = session.get('cpp_file')  # Original file
+        fixed_snippets = session.get('fixed_snippets', {})
+        numbered_file = session.get('numbered_file')
+        
+        if not original_file or not numbered_file:
             raise HTTPException(status_code=404, detail="Required files not found")
         
-        # Get only accepted snippets
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        accepted_snippets = review_manager.get_accepted_snippets(all_fixed_snippets)
-        
-        # Create temporary fixed file
+        # Create temporary fixed denumbered file for comparison with original
         temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
-            numbered_file, accepted_snippets, project_id, UPLOAD_FOLDER
+            numbered_file, fixed_snippets, project_id, UPLOAD_FOLDER
         )
         
-        content = get_file_content(temp_fixed_denumbered_path)
+        # Create diff data comparing original with fixed denumbered file
+        diff_data = create_diff_data(original_file, temp_fixed_denumbered_path, fixed_snippets)
         
-        # Clean up temporary files
-        cleanup_temp_files([temp_fixed_numbered_path, temp_fixed_denumbered_path])
+        # Store temp paths in session for potential cleanup
+        session['temp_fixed_numbered'] = temp_fixed_numbered_path
+        session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
         
-        return {"content": content}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/diff/{project_id}")
-async def get_diff(project_id: str):
-    """Get diff data for side-by-side comparison"""
-    try:
-        if project_id not in sessions:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        session = sessions[project_id]
-        numbered_file = session.get('numbered_file')
-        all_fixed_snippets = session.get('fixed_snippets', {})
-        
-        if not numbered_file or not all_fixed_snippets:
-            raise HTTPException(status_code=404, detail="Required files not found")
-        
-        # Get only accepted snippets for the fixed version
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        accepted_snippets = review_manager.get_accepted_snippets(all_fixed_snippets)
-        
-        # Create diff data
-        diff_data = create_diff_data(numbered_file, accepted_snippets, project_id, UPLOAD_FOLDER)
-        
-        return diff_data
+        return DiffResponse(**diff_data)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/review/fixes/{project_id}")
-async def get_review_fixes(project_id: str):
-    """Get list of all fixes with their review status"""
-    try:
-        if project_id not in sessions:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        session = sessions[project_id]
-        all_fixed_snippets = session.get('fixed_snippets', {})
-        
-        if not all_fixed_snippets:
-            return {"fixes": [], "summary": {"total_fixes": 0, "accepted_count": 0, "rejected_count": 0, "pending_count": 0}}
-        
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        fixes = review_manager.get_fix_list(all_fixed_snippets)
-        summary = review_manager.get_review_summary(all_fixed_snippets)
-        
-        return {"fixes": fixes, "summary": summary}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# New Review Management Endpoints
 
-@app.post("/api/review/accept/{project_id}")
-async def accept_fix(project_id: str, line_keys: List[str]):
-    """Accept specific line fixes"""
-    try:
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        for line_key in line_keys:
-            review_manager.accept_line(line_key)
-        return {"success": True, "message": f"Accepted {len(line_keys)} fixes"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/review/reject/{project_id}")
-async def reject_fix(project_id: str, line_keys: List[str]):
-    """Reject specific line fixes"""
-    try:
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        for line_key in line_keys:
-            review_manager.reject_line(line_key)
-        return {"success": True, "message": f"Rejected {len(line_keys)} fixes"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/review/reset/{project_id}")
-async def reset_fix(project_id: str, line_keys: List[str]):
-    """Reset specific line fixes to pending status"""
-    try:
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        for line_key in line_keys:
-            # Remove from both accepted and rejected sets
-            review_manager.accepted_lines.discard(line_key)
-            review_manager.rejected_lines.discard(line_key)
-        review_manager._save_review_state()
-        return {"success": True, "message": f"Reset {len(line_keys)} fixes to pending"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/review/reset-all/{project_id}")
-async def reset_all_fixes(project_id: str):
-    """Reset all fixes to pending status"""
-    try:
-        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
-        review_manager.reset_review()
-        return {"success": True, "message": "All fixes reset to pending"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/code-snippets/{project_id}")
-async def get_code_snippets(project_id: str):
-    """Get all code snippets for a project"""
+@app.get("/api/review/state/{project_id}", response_model=ReviewStateResponse)
+async def get_review_state(project_id: str):
+    """Get current review state for all fixes"""
     try:
         if project_id not in sessions:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -536,14 +599,104 @@ async def get_code_snippets(project_id: str):
         session = sessions[project_id]
         fixed_snippets = session.get('fixed_snippets', {})
         
-        return {"snippets": fixed_snippets}
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        fixes = review_manager.get_fix_list(fixed_snippets)
+        summary = review_manager.get_review_summary(fixed_snippets)
+        
+        return ReviewStateResponse(fixes=fixes, summary=summary)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/action")
+async def review_action(request: ReviewActionRequest):
+    """Accept or reject a specific fix"""
+    try:
+        project_id = request.projectId
+        line_key = request.line_key
+        action = request.action
+        
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        
+        if action == "accept":
+            review_manager.accept_line(line_key)
+        elif action == "reject":
+            review_manager.reject_line(line_key)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid action. Use 'accept' or 'reject'")
+        
+        # Update temporary files with only accepted changes
+        session = sessions[project_id]
+        fixed_snippets = session.get('fixed_snippets', {})
+        numbered_file = session.get('numbered_file')
+        
+        if numbered_file:
+            accepted_snippets = review_manager.get_accepted_snippets(fixed_snippets)
+            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                numbered_file, accepted_snippets, project_id, UPLOAD_FOLDER
+            )
+            session['temp_fixed_numbered'] = temp_fixed_numbered_path
+            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+        
+        return {"success": True, "message": f"Line {line_key} {action}ed successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/navigate")
+async def navigate_review(request: NavigationRequest):
+    """Set current review navigation index"""
+    try:
+        project_id = request.projectId
+        index = request.index
+        
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        review_manager.set_current_review_index(index)
+        
+        return {"success": True, "current_index": index}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/code-snippets/{project_id}")
+async def get_code_snippets(project_id: str):
+    """Get code snippets for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        fixed_snippets = session.get('fixed_snippets', {})
+        
+        return fixed_snippets
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/review/reset/{project_id}")
+async def reset_review(project_id: str):
+    """Reset all review decisions for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
+        review_manager.reset_review()
+        
+        return {"success": True, "message": "Review state reset successfully"}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/process/apply-accepted-fixes", response_model=ApplyFixesResponse)
 async def process_apply_accepted_fixes(request: ApplyFixesRequest):
-    """Apply only the accepted fixes to create final file - ALWAYS uses original numbered file as base"""
+    """Apply only the accepted fixes to create final file"""
     try:
         project_id = request.projectId
         
@@ -551,20 +704,18 @@ async def process_apply_accepted_fixes(request: ApplyFixesRequest):
             raise HTTPException(status_code=404, detail="Project not found")
         
         session = sessions[project_id]
-        # ALWAYS use the original numbered file as the base
-        original_numbered_file = session['numbered_file']
+        numbered_file = session['numbered_file']
         all_fixed_snippets = session.get('fixed_snippets', {})
         
         # Get only accepted snippets
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
         accepted_snippets = review_manager.get_accepted_snippets(all_fixed_snippets)
         
-        # Apply only accepted fixes to ORIGINAL file
+        # Apply only accepted fixes
         fixed_filename = f"fixed_{session['original_filename']}"
         fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{session['original_filename']}")
         
-        # Use original numbered file as base, not any previously modified version
-        merge_fixed_snippets_into_file(original_numbered_file, accepted_snippets, fixed_numbered_path)
+        merge_fixed_snippets_into_file(numbered_file, accepted_snippets, fixed_numbered_path)
         
         # Remove line numbers for final file
         final_fixed_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{fixed_filename}")
@@ -578,18 +729,16 @@ async def process_apply_accepted_fixes(request: ApplyFixesRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/model-settings")
-async def get_model_settings():
-    """Get current model settings"""
-    return model_settings
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
-@app.post("/api/model-settings")
-async def update_model_settings(settings: ModelSettings):
-    """Update model settings"""
-    global model_settings
-    model_settings = settings.dict()
-    return {"success": True, "settings": model_settings}
+# Root endpoint
+@app.get("/")
+async def root():
+    return {"message": "MISRA Fix Copilot API Server is running"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
