@@ -361,133 +361,163 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
   // Create aligned diff view that maintains line correspondence
   const createAlignedDiff = (originalCode: string, fixedCode: string) => {
-    if (!originalCode || !fixedCode || !highlightData) {
+    if (!originalCode || !fixedCode || !codeSnippets) {
       return {
         originalLines: originalCode?.split('\n') || [],
-        fixedLines: fixedCode?.split('\n') || []
+        fixedLines: fixedCode?.split('\n') || [],
+        lineMapping: new Map()
       };
     }
 
     const originalLines = originalCode.split('\n');
-    const fixedLines = fixedCode.split('\n');
     const alignedOriginal: (string | null)[] = [];
     const alignedFixed: (string | null)[] = [];
+    const lineMapping = new Map(); // Maps visual line index to original line number
 
-    let originalIndex = 0;
-    let fixedIndex = 0;
-
-    // Process each line based on the highlight data
-    const changedLinesSet = new Set(highlightData.changed_lines || []);
-    const addedLinesSet = new Set(highlightData.added_lines || []);
-    const removedLinesSet = new Set(highlightData.removed_lines || []);
-
-    // Create a mapping of original line numbers to their changes
-    const lineChanges = new Map();
-    Object.keys(codeSnippets).forEach(lineKey => {
-      const lineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
-      const changeType = getLineChangeType(lineKey, originalLines);
-      if (!lineChanges.has(lineNum)) {
-        lineChanges.set(lineNum, []);
-      }
-      lineChanges.get(lineNum).push({ lineKey, changeType });
+    // Sort snippet keys by line number
+    const sortedSnippetKeys = Object.keys(codeSnippets).sort((a, b) => {
+      const aNum = parseInt(a.match(/^(\d+)/)?.[1] || '0');
+      const bNum = parseInt(b.match(/^(\d+)/)?.[1] || '0');
+      if (aNum !== bNum) return aNum - bNum;
+      return a.localeCompare(b);
     });
 
-    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
-      const currentOriginalLine = originalIndex + 1;
+    // Group snippets by base line number
+    const lineGroups = new Map();
+    sortedSnippetKeys.forEach(lineKey => {
+      const baseLineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
+      if (!lineGroups.has(baseLineNum)) {
+        lineGroups.set(baseLineNum, []);
+      }
+      lineGroups.get(baseLineNum).push(lineKey);
+    });
+
+    let currentVisualIndex = 0;
+    let processedOriginalLines = new Set();
+
+    // Process each line group
+    for (let originalLineNum = 1; originalLineNum <= originalLines.length; originalLineNum++) {
+      const originalContent = originalLines[originalLineNum - 1];
       
-      if (lineChanges.has(currentOriginalLine)) {
-        const changes = lineChanges.get(currentOriginalLine);
+      if (lineGroups.has(originalLineNum)) {
+        const lineKeys = lineGroups.get(originalLineNum);
         
-        // Handle original line
-        if (originalIndex < originalLines.length) {
-          alignedOriginal.push(originalLines[originalIndex]);
-          originalIndex++;
-        } else {
-          alignedOriginal.push(null);
-        }
-
-        // Handle fixed line(s) - may have multiple lines for additions
-        let addedCount = 0;
-        for (const change of changes) {
-          if (change.changeType.type === 'added') {
-            addedCount++;
-          }
-        }
-
-        if (fixedIndex < fixedLines.length) {
-          alignedFixed.push(fixedLines[fixedIndex]);
-          fixedIndex++;
+        // Process each change in this line group
+        for (const lineKey of lineKeys) {
+          const changeType = getLineChangeType(lineKey, originalLines);
+          const isNewLine = /[a-z]$/.test(lineKey);
           
-          // Add any additional lines for insertions
-          for (let i = 0; i < addedCount; i++) {
-            if (fixedIndex < fixedLines.length) {
-              alignedOriginal.push(null); // Empty space in original
-              alignedFixed.push(fixedLines[fixedIndex]);
-              fixedIndex++;
+          if (isNewLine) {
+            // New line - only appears in fixed side
+            alignedOriginal.push(null);
+            alignedFixed.push(codeSnippets[lineKey] || '');
+            lineMapping.set(currentVisualIndex, originalLineNum);
+          } else {
+            // Original line modification/deletion
+            if (changeType.type === 'deleted') {
+              // Deleted line - appears in original but not in fixed
+              alignedOriginal.push(originalContent);
+              alignedFixed.push(null);
+            } else {
+              // Modified line or unchanged line with snippet
+              alignedOriginal.push(originalContent);
+              alignedFixed.push(codeSnippets[lineKey] || originalContent);
             }
+            lineMapping.set(currentVisualIndex, originalLineNum);
+            processedOriginalLines.add(originalLineNum);
           }
-        } else {
-          alignedFixed.push(null);
+          currentVisualIndex++;
         }
       } else {
-        // No changes for this line, copy as-is
-        if (originalIndex < originalLines.length) {
-          alignedOriginal.push(originalLines[originalIndex]);
-          originalIndex++;
-        } else {
-          alignedOriginal.push(null);
-        }
-
-        if (fixedIndex < fixedLines.length) {
-          alignedFixed.push(fixedLines[fixedIndex]);
-          fixedIndex++;
-        } else {
-          alignedFixed.push(null);
-        }
+        // No changes for this line - unchanged
+        alignedOriginal.push(originalContent);
+        alignedFixed.push(originalContent);
+        lineMapping.set(currentVisualIndex, originalLineNum);
+        processedOriginalLines.add(originalLineNum);
+        currentVisualIndex++;
       }
     }
 
     return {
       originalLines: alignedOriginal,
-      fixedLines: alignedFixed
+      fixedLines: alignedFixed,
+      lineMapping
     };
   };
 
   const highlightDifferencesWithActions = (originalLines: (string | null)[], fixedLines: (string | null)[], isOriginal: boolean) => {
-    if (!originalCode || !fixedCode || !highlightData) return [];
+    if (!originalCode || !fixedCode || !codeSnippets) return [];
     
     const linesToRender = isOriginal ? originalLines : fixedLines;
     const lineGroups = getLineGroups();
     
-    return linesToRender.map((line, index) => {
+    return linesToRender.map((line, visualIndex) => {
       let className = '';
-      const actualLineNumber = index + 1;
       let lineKey = '';
       let primaryFix: Fix | undefined;
       let relatedLineKeys: string[] = [];
       let hasActualChanges = false;
       let showButtons = false;
 
-      // Find the corresponding line key and fix
+      // Find all snippets that might affect this visual line
+      let candidateLineKeys: string[] = [];
+      
       if (line !== null) {
-        // Try to find the line key that corresponds to this visual line
-        for (const [key, snippetContent] of Object.entries(codeSnippets)) {
-          const keyLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
+        // For each snippet, check if it could map to this visual line
+        Object.keys(codeSnippets).forEach(key => {
+          const baseLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
           const isNewLine = /[a-z]$/.test(key);
           
-          // For original lines, match by line number
-          if (isOriginal && !isNewLine && keyLineNum === actualLineNumber) {
-            lineKey = key;
-            break;
+          // Count how many lines before this visual index are from the same base line or earlier
+          let linesFromSameOrEarlierBase = 0;
+          for (let i = 0; i <= visualIndex; i++) {
+            const lineAtIndex = isOriginal ? originalLines[i] : fixedLines[i];
+            if (lineAtIndex !== null) {
+              // Check all snippets that could contribute to this line
+              Object.keys(codeSnippets).forEach(checkKey => {
+                const checkBaseLineNum = parseInt(checkKey.match(/^(\d+)/)?.[1] || '0');
+                if (checkBaseLineNum <= baseLineNum) {
+                  // This could be a contributing line
+                }
+              });
+            }
           }
-          // For fixed lines, it's more complex due to line shifts
-          else if (!isOriginal) {
-            // This would need more sophisticated mapping
-            // For now, use similar logic but account for insertions
-            if (keyLineNum === actualLineNumber) {
-              lineKey = key;
+          
+          // For now, use a simpler approach based on visual line position
+          // Find the snippet that is most likely to correspond to this visual line
+          if (baseLineNum >= 1 && baseLineNum <= originalCode.split('\n').length) {
+            candidateLineKeys.push(key);
+          }
+        });
+        
+        // Find the most appropriate line key for this visual position
+        if (candidateLineKeys.length > 0) {
+          // Sort by relevance and pick the best match
+          candidateLineKeys.sort((a, b) => {
+            const aNum = parseInt(a.match(/^(\d+)/)?.[1] || '0');
+            const bNum = parseInt(b.match(/^(\d+)/)?.[1] || '0');
+            return aNum - bNum;
+          });
+          
+          // For simplicity, map by trying to find a snippet near this visual line
+          const searchStart = Math.max(1, visualIndex - 2);
+          const searchEnd = Math.min(originalCode.split('\n').length, visualIndex + 3);
+          
+          for (let searchLine = searchStart; searchLine <= searchEnd; searchLine++) {
+            const searchKey = searchLine.toString();
+            if (codeSnippets[searchKey] !== undefined) {
+              lineKey = searchKey;
               break;
             }
+            // Also check for suffixed versions (e.g., "123a")
+            for (const suffix of ['a', 'b', 'c', 'd', 'e']) {
+              const suffixedKey = searchLine + suffix;
+              if (codeSnippets[suffixedKey] !== undefined) {
+                lineKey = suffixedKey;
+                break;
+              }
+            }
+            if (lineKey) break;
           }
         }
 
@@ -507,35 +537,60 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         }
       }
 
-      // Apply styling based on line type
+      // Apply styling based on line type and requirements
       if (line === null) {
-        className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
-        line = isOriginal ? '(line removed)' : '(line added)';
+        if (isOriginal) {
+          // Missing line in original (added line) - gray placeholder
+          className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
+          line = '(new line)';
+        } else {
+          // Missing line in fixed (deleted line) - gray placeholder
+          className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
+          line = '(deleted line)';
+        }
       } else {
-        const isDeletedLine = isOriginal && hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
+        // Determine line type based on changes
+        let lineType = 'unchanged';
         
-        const isAddedLine = !isOriginal && hasActualChanges &&
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
+        if (hasActualChanges && relatedLineKeys.length > 0) {
+          const changeTypes = relatedLineKeys.map(key => getLineChangeType(key, originalCode.split('\n')).type);
           
-        const isModifiedLine = hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
-
-        if (isAddedLine) {
-          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-        } else if (isDeletedLine) {
-          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
-        } else if (isModifiedLine) {
-          className = isOriginal 
-            ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
-            : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+          if (changeTypes.includes('deleted')) {
+            lineType = 'deleted';
+          } else if (changeTypes.includes('added')) {
+            lineType = 'added';
+          } else if (changeTypes.includes('modified')) {
+            lineType = 'modified';
+          }
         }
 
+        // Apply colors according to requirements:
+        // - deleted: red on both sides
+        // - modified: red on original side, yellow on fixed side  
+        // - newLine: green on fixed side, no code snippet on original side
+        switch (lineType) {
+          case 'deleted':
+            className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+            break;
+          case 'modified':
+            className = isOriginal 
+              ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
+              : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+            break;
+          case 'added':
+            // New lines only appear on fixed side and are green
+            if (!isOriginal) {
+              className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+            }
+            break;
+        }
+
+        // Show inline controls only on fixed side as requested
         showButtons = hasActualChanges && !!primaryFix && !isOriginal;
       }
       
       return (
-        <div key={index} className={`${className} px-2 py-0.5 group relative`}>
+        <div key={visualIndex} className={`${className} px-2 py-0.5 group relative`}>
           <div className="flex items-center justify-between">
             <span className="flex-1 font-mono text-xs">
               {line}
@@ -908,7 +963,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               {code ? (
                 isOriginal !== undefined ? (
                   <div className="space-y-0">
-                    {highlightDifferencesWithActions(linesToRender, alignedDiff.fixedLines, isOriginal)}
+                    {highlightDifferencesWithActions(alignedDiff.originalLines, alignedDiff.fixedLines, isOriginal)}
                   </div>
                 ) : (
                   code
