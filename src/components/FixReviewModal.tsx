@@ -141,15 +141,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix based on line numbers
         setTimeout(() => {
-          // Find next pending fix that has actual changes by comparing line numbers
+          // Find next pending fix by comparing line numbers
           const currentLineNum = parseInt(fixes[currentFixIndex]?.line_key.match(/^(\d+)/)?.[1] || '0');
           const nextPendingFix = updatedFixes
-            .filter(fix => {
-              if (fix.status !== 'pending') return false;
-              // Only consider fixes that have actual content changes
-              const changeType = getLineChangeType(fix.line_key, originalCode.split('\n'));
-              return changeType.type !== 'unchanged';
-            })
+            .filter(fix => fix.status === 'pending')
             .find(fix => {
               const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
               return fixLineNum > currentLineNum;
@@ -491,7 +486,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
       const primaryFix = allRelatedFixes[0];
       
-      // Check if any related line has actual changes by comparing content
+      // Check if any related line has actual changes
       const hasActualChanges = relatedLineKeys.some(key => {
         const changeType = getLineChangeType(key, originalCode.split('\n'));
         return changeType.type !== 'unchanged';
@@ -574,36 +569,18 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       return { type: 'added', originalContent: '', fixedContent: codeSnippets[lineKey] || '' };
     }
     
-    // Get original line content (remove line number prefix if exists)
-    let originalContent = originalLines[lineNumber - 1] || '';
-    // Remove line number prefix if it exists (e.g., "123:" or "123a:")
-    originalContent = originalContent.replace(/^\d+[a-zA-Z]*:\s*/, '').trim();
+    const originalContent = originalLines[lineNumber - 1]?.trim() || '';
+    const fixedContent = codeSnippets[lineKey]?.trim() || '';
     
-    // Get fixed content from JSON snippets
-    let fixedContent = codeSnippets[lineKey] || '';
-    // Remove any leading whitespace but preserve code structure
-    fixedContent = fixedContent.trim();
-    
-    // If no fixed content exists in JSON, this line is not being changed
-    if (!codeSnippets.hasOwnProperty(lineKey)) {
-      return { type: 'unchanged', originalContent, fixedContent: originalContent };
-    }
-    
-    // Check for deletion (empty fixed content when original exists)
-    if (originalContent && !fixedContent) {
-      return { type: 'deleted', originalContent, fixedContent: '' };
-    }
-    
-    // Check for addition (no original content but has fixed content)
     if (!originalContent && fixedContent) {
       return { type: 'added', originalContent: '', fixedContent };
     }
     
-    // Compare normalized content to detect actual changes
-    const normalizedOriginal = originalContent.replace(/\s+/g, ' ').trim();
-    const normalizedFixed = fixedContent.replace(/\s+/g, ' ').trim();
+    if (originalContent && !fixedContent) {
+      return { type: 'deleted', originalContent, fixedContent: '' };
+    }
     
-    if (normalizedOriginal !== normalizedFixed) {
+    if (originalContent !== fixedContent) {
       return { type: 'modified', originalContent, fixedContent };
     }
     
