@@ -139,16 +139,16 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setHighlightData(diffResponse.data.highlight);
         }
         
-        // Auto-advance to next pending fix based on line numbers
+        // Auto-advance to next pending fix with actual changes
         setTimeout(() => {
-          // Find next pending fix by comparing line numbers
-          const currentLineNum = parseInt(fixes[currentFixIndex]?.line_key.match(/^(\d+)/)?.[1] || '0');
-          const nextPendingFix = updatedFixes
-            .filter(fix => fix.status === 'pending')
-            .find(fix => {
-              const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
-              return fixLineNum > currentLineNum;
-            });
+          const changedFixes = getActualChangedFixes();
+          const currentChanged = changedFixes.find(fix => fix.line_key === fixes[currentFixIndex]?.line_key);
+          const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+          
+          // Find next pending fix with actual changes
+          const nextPendingFix = changedFixes
+            .slice(currentChangedIndex + 1)
+            .find(fix => fix.status === 'pending');
           
           if (nextPendingFix) {
             const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
@@ -219,12 +219,13 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setHighlightData(diffResponse.data.highlight);
         }
         
-        // Auto-advance to next pending fix based on line numbers
+        // Auto-advance to next pending fix with actual changes
         setTimeout(() => {
-          // Find next pending fix by comparing line numbers
-          const currentLineKeys = lineKeys.map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0'));
-          const maxCurrentLineNum = Math.max(...currentLineKeys);
-          const nextPendingFix = updatedFixes
+          const changedFixes = getActualChangedFixes();
+          const maxCurrentLineNum = Math.max(...lineKeys.map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0')));
+          
+          // Find next pending fix with actual changes
+          const nextPendingFix = changedFixes
             .filter(fix => fix.status === 'pending')
             .find(fix => {
               const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
@@ -534,27 +535,92 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const getLineChangeType = (lineKey: string, originalLines: string[]) => {
     const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
     const isNewLine = /[a-z]$/.test(lineKey);
+    const isDeletedLine = codeSnippets[lineKey] === "";
     
     if (isNewLine) {
       return { type: 'added', originalContent: '', fixedContent: codeSnippets[lineKey] || '' };
     }
     
+    if (isDeletedLine) {
+      const originalContent = originalLines[lineNumber - 1]?.trim() || '';
+      return { type: 'deleted', originalContent, fixedContent: '' };
+    }
+    
     const originalContent = originalLines[lineNumber - 1]?.trim() || '';
     const fixedContent = codeSnippets[lineKey]?.trim() || '';
+    
+    // Remove line number prefixes from both for comparison
+    const cleanOriginal = originalContent.replace(/^\d+\s*/, '').trim();
+    const cleanFixed = fixedContent.replace(/^\d+\s*/, '').trim();
     
     if (!originalContent && fixedContent) {
       return { type: 'added', originalContent: '', fixedContent };
     }
     
-    if (originalContent && !fixedContent) {
-      return { type: 'deleted', originalContent, fixedContent: '' };
-    }
-    
-    if (originalContent !== fixedContent) {
+    if (cleanOriginal !== cleanFixed && fixedContent) {
       return { type: 'modified', originalContent, fixedContent };
     }
     
     return { type: 'unchanged', originalContent, fixedContent };
+  };
+
+  // Get list of fixes that have actual changes (not just line number prefixes)
+  const getActualChangedFixes = () => {
+    if (!originalCode || !codeSnippets) return [];
+    
+    const originalLines = originalCode.split('\n');
+    return fixes.filter(fix => {
+      const changeType = getLineChangeType(fix.line_key, originalLines);
+      return changeType.type !== 'unchanged';
+    });
+  };
+
+  // Navigation functions for actual changes only
+  const navigateToNextChange = () => {
+    const changedFixes = getActualChangedFixes();
+    const currentChanged = changedFixes.find(fix => fix.line_key === currentFix?.line_key);
+    const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+    
+    if (currentChangedIndex < changedFixes.length - 1) {
+      const nextFix = changedFixes[currentChangedIndex + 1];
+      const nextIndex = fixes.findIndex(fix => fix.line_key === nextFix.line_key);
+      navigateToFix(nextIndex);
+    }
+  };
+
+  const navigateToPreviousChange = () => {
+    const changedFixes = getActualChangedFixes();
+    const currentChanged = changedFixes.find(fix => fix.line_key === currentFix?.line_key);
+    const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+    
+    if (currentChangedIndex > 0) {
+      const prevFix = changedFixes[currentChangedIndex - 1];
+      const prevIndex = fixes.findIndex(fix => fix.line_key === prevFix.line_key);
+      navigateToFix(prevIndex);
+    }
+  };
+
+  // Accept/Reject all pending changes
+  const handleAcceptAll = () => {
+    const changedFixes = getActualChangedFixes();
+    const pendingLineKeys = changedFixes
+      .filter(fix => fix.status === 'pending')
+      .map(fix => fix.line_key);
+    
+    if (pendingLineKeys.length > 0) {
+      handleGroupReviewAction(pendingLineKeys, 'accept');
+    }
+  };
+
+  const handleRejectAll = () => {
+    const changedFixes = getActualChangedFixes();
+    const pendingLineKeys = changedFixes
+      .filter(fix => fix.status === 'pending')
+      .map(fix => fix.line_key);
+    
+    if (pendingLineKeys.length > 0) {
+      handleGroupReviewAction(pendingLineKeys, 'reject');
+    }
   };
 
   // Render inline diff view with accept/reject buttons for each change
@@ -714,20 +780,77 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             <div className="flex items-center gap-2">
               <Eye className="w-5 h-5" />
               Code Fix Review
+              {summary && (
+                <span className="text-sm text-muted-foreground">
+                  ({summary.accepted_count} accepted, {summary.rejected_count} rejected, {summary.pending_count} pending)
+                </span>
+              )}
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={resetReview}
-              className="flex items-center gap-2"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Reset
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetReview}
+                className="flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reset
+              </Button>
+            </div>
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Navigation and Bulk Action Controls */}
+          <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={navigateToPreviousChange}
+                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) <= 0}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={navigateToNextChange}
+                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) >= getActualChangedFixes().length - 1}
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+              {currentFix && (
+                <span className="text-sm text-muted-foreground ml-2">
+                  Change {getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) + 1} of {getActualChangedFixes().length}
+                </span>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRejectAll}
+                disabled={getActualChangedFixes().filter(f => f.status === 'pending').length === 0}
+                className="text-red-600 hover:text-red-700"
+              >
+                <XIcon className="w-4 h-4 mr-1" />
+                Reject All
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleAcceptAll}
+                disabled={getActualChangedFixes().filter(f => f.status === 'pending').length === 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <Check className="w-4 h-4 mr-1" />
+                Accept All
+              </Button>
+            </div>
+          </div>
 
           {/* Code Diff View */}
           <Tabs defaultValue="inline" className="w-full">
