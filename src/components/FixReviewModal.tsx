@@ -252,6 +252,36 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
+  const handleAcceptAll = async () => {
+    if (!state.projectId) return;
+    
+    const pendingFixes = fixes.filter(fix => fix.status === 'pending');
+    if (pendingFixes.length === 0) {
+      toast({
+        title: "Info",
+        description: "No pending fixes to accept",
+      });
+      return;
+    }
+    
+    const lineKeys = pendingFixes.map(fix => fix.line_key);
+    await handleGroupReviewAction(lineKeys, 'accept');
+  };
+
+  const navigateToNextFix = () => {
+    const nextIndex = currentFixIndex + 1;
+    if (nextIndex < fixes.length) {
+      navigateToFix(nextIndex);
+    }
+  };
+
+  const navigateToPreviousFix = () => {
+    const prevIndex = currentFixIndex - 1;
+    if (prevIndex >= 0) {
+      navigateToFix(prevIndex);
+    }
+  };
+
   const handleSingleLineReset = async (lineKey: string) => {
     if (!state.projectId) return;
     
@@ -485,21 +515,21 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
             </span>
             {showButtons && primaryFix && (
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2 shrink-0">
+              <div className="flex gap-1 ml-2 shrink-0">
                 {primaryFix.status === 'pending' ? (
                   <>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
-                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                      className="text-red-600 h-6 px-2 text-xs"
                     >
                       <XIcon className="w-3 h-3" />
                     </Button>
                     <Button
                       size="sm"
                       onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
-                      className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
+                      className="bg-green-600 h-6 px-2 text-xs"
                     >
                       <Check className="w-3 h-3" />
                     </Button>
@@ -745,10 +775,77 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             </TabsContent>
 
             <TabsContent value="diff" className="mt-4">
-              <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original Code", true)}
-                <div className="border-l">
-                  {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)", false)}
+              <div className="space-y-4">
+                {/* Diff View Controls */}
+                <div className="flex items-center justify-between border-b pb-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={navigateToPreviousFix}
+                        disabled={currentFixIndex === 0}
+                        className="flex items-center gap-1"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        {currentFixIndex + 1} of {fixes.length}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={navigateToNextFix}
+                        disabled={currentFixIndex === fixes.length - 1}
+                        className="flex items-center gap-1"
+                      >
+                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {currentFix && currentFix.status === 'pending' && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleReviewAction(currentFix.line_key, 'reject')}
+                          className="text-red-600 flex items-center gap-1"
+                        >
+                          <XIcon className="w-4 h-4" />
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleReviewAction(currentFix.line_key, 'accept')}
+                          className="bg-green-600 flex items-center gap-1"
+                        >
+                          <Check className="w-4 h-4" />
+                          Accept
+                        </Button>
+                      </>
+                    )}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleAcceptAll}
+                      disabled={!fixes.some(fix => fix.status === 'pending')}
+                      className="flex items-center gap-1"
+                    >
+                      <Check className="w-4 h-4" />
+                      Accept All
+                    </Button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
+                  {renderCodeBlock(originalCode, "Original Code", true)}
+                  <div className="border-l">
+                    {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)", false)}
+                  </div>
                 </div>
               </div>
             </TabsContent>
