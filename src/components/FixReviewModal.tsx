@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Eye, Code2, Check, X as XIcon, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,14 +45,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const fixedScrollRef = useRef<HTMLDivElement>(null);
 
-  // Load review data when modal opens
   useEffect(() => {
     if (isOpen && state.projectId) {
       loadReviewData();
     }
   }, [isOpen, state.projectId]);
 
-  // Auto-scroll to current fix when index changes
   useEffect(() => {
     if (fixes.length > 0 && currentFixIndex < fixes.length) {
       scrollToFix(fixes[currentFixIndex]);
@@ -183,116 +180,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  const handleGroupReviewAction = async (lineKeys: string[], action: 'accept' | 'reject') => {
-    if (!state.projectId || lineKeys.length === 0) return;
-    
-    try {
-      // Process all line keys in the group
-      const promises = lineKeys.map(lineKey => 
-        apiClient.reviewAction(state.projectId!, lineKey, action)
-      );
-      
-      const responses = await Promise.all(promises);
-      const allSuccessful = responses.every(response => response.success);
-      
-      if (allSuccessful) {
-        // Update local state for all lines in the group
-        const updatedFixes = fixes.map(fix => 
-          lineKeys.includes(fix.line_key)
-            ? { ...fix, status: action === 'accept' ? 'accepted' as const : 'rejected' as const }
-            : fix
-        );
-        setFixes(updatedFixes);
-        
-        // Update summary
-        if (summary) {
-          const newSummary = { ...summary };
-          
-          // Count changes by previous status
-          let pendingToChange = 0;
-          let acceptedToChange = 0;
-          let rejectedToChange = 0;
-          
-          lineKeys.forEach(lineKey => {
-            const currentFix = fixes.find(fix => fix.line_key === lineKey);
-            if (currentFix?.status === 'pending') {
-              pendingToChange += 1;
-            } else if (currentFix?.status === 'accepted') {
-              acceptedToChange += 1;
-            } else if (currentFix?.status === 'rejected') {
-              rejectedToChange += 1;
-            }
-          });
-          
-          // Adjust counts
-          newSummary.pending_count -= pendingToChange;
-          newSummary.accepted_count -= acceptedToChange;
-          newSummary.rejected_count -= rejectedToChange;
-          
-          if (action === 'accept') {
-            newSummary.accepted_count += lineKeys.length;
-          } else {
-            newSummary.rejected_count += lineKeys.length;
-          }
-          
-          setSummary(newSummary);
-        }
-        
-        toast({
-          title: "Success",
-          description: `${lineKeys.length} fix(es) ${action}ed successfully`,
-        });
-        
-        // Reload diff to show updated changes
-        const diffResponse = await apiClient.getDiff(state.projectId);
-        if (diffResponse.success && diffResponse.data) {
-          setOriginalCode(diffResponse.data.original);
-          setFixedCode(diffResponse.data.fixed);
-          setHighlightData(diffResponse.data.highlight);
-        }
-        
-        // Auto-advance to next pending fix with actual changes
-        setTimeout(() => {
-          const changedFixes = getActualChangedFixes();
-          const maxCurrentLineNum = Math.max(...lineKeys.map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0')));
-          
-          // Find next pending fix with actual changes
-          const nextPendingFix = changedFixes
-            .filter(fix => fix.status === 'pending')
-            .find(fix => {
-              const fixLineNum = parseInt(fix.line_key.match(/^(\d+)/)?.[1] || '0');
-              return fixLineNum > maxCurrentLineNum;
-            });
-          
-          if (nextPendingFix) {
-            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-            if (nextIndex !== -1) {
-              setCurrentFixIndex(nextIndex);
-              if (state.projectId) {
-                apiClient.navigateReview(state.projectId, nextIndex);
-              }
-              scrollToFix(nextPendingFix);
-            }
-          }
-        }, 100);
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: `Failed to ${action} fixes`,
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleSingleLineReset = async (lineKey: string) => {
     if (!state.projectId) return;
     
     try {
-      const currentFix = fixes.find(fix => fix.line_key === lineKey);
-      if (!currentFix || currentFix.status === 'pending') return;
-      
-      // Call the API to actually remove the entry from review JSON
       const response = await apiClient.reviewAction(state.projectId, lineKey, 'reset');
       
       if (response.success) {
@@ -305,11 +196,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         setFixes(updatedFixes);
         
         // Update summary
-        if (summary) {
+        const currentFix = fixes.find(fix => fix.line_key === lineKey);
+        if (summary && currentFix) {
           const newSummary = { ...summary };
           if (currentFix.status === 'accepted') {
             newSummary.accepted_count -= 1;
-          } else {
+          } else if (currentFix.status === 'rejected') {
             newSummary.rejected_count -= 1;
           }
           newSummary.pending_count += 1;
@@ -328,12 +220,13 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setFixedCode(diffResponse.data.fixed);
           setHighlightData(diffResponse.data.highlight);
         }
+      } else {
+        throw new Error(response.error || 'Failed to reset fix');
       }
-      
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to reset fix",
+        description: error instanceof Error ? error.message : "Failed to reset fix",
         variant: "destructive",
       });
     }
@@ -466,80 +359,202 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return groups;
   };
 
-  const highlightDifferencesWithActions = (code: string, isOriginal: boolean) => {
-    if (!originalCode || !fixedCode || !highlightData) return code;
+  // Create aligned diff view that maintains line correspondence
+  const createAlignedDiff = (originalCode: string, fixedCode: string) => {
+    if (!originalCode || !fixedCode || !highlightData) {
+      return {
+        originalLines: originalCode?.split('\n') || [],
+        fixedLines: fixedCode?.split('\n') || []
+      };
+    }
+
+    const originalLines = originalCode.split('\n');
+    const fixedLines = fixedCode.split('\n');
+    const alignedOriginal: (string | null)[] = [];
+    const alignedFixed: (string | null)[] = [];
+
+    let originalIndex = 0;
+    let fixedIndex = 0;
+
+    // Process each line based on the highlight data
+    const changedLinesSet = new Set(highlightData.changed_lines || []);
+    const addedLinesSet = new Set(highlightData.added_lines || []);
+    const removedLinesSet = new Set(highlightData.removed_lines || []);
+
+    // Create a mapping of original line numbers to their changes
+    const lineChanges = new Map();
+    Object.keys(codeSnippets).forEach(lineKey => {
+      const lineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
+      const changeType = getLineChangeType(lineKey, originalLines);
+      if (!lineChanges.has(lineNum)) {
+        lineChanges.set(lineNum, []);
+      }
+      lineChanges.get(lineNum).push({ lineKey, changeType });
+    });
+
+    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
+      const currentOriginalLine = originalIndex + 1;
+      
+      if (lineChanges.has(currentOriginalLine)) {
+        const changes = lineChanges.get(currentOriginalLine);
+        
+        // Handle original line
+        if (originalIndex < originalLines.length) {
+          alignedOriginal.push(originalLines[originalIndex]);
+          originalIndex++;
+        } else {
+          alignedOriginal.push(null);
+        }
+
+        // Handle fixed line(s) - may have multiple lines for additions
+        let addedCount = 0;
+        for (const change of changes) {
+          if (change.changeType.type === 'added') {
+            addedCount++;
+          }
+        }
+
+        if (fixedIndex < fixedLines.length) {
+          alignedFixed.push(fixedLines[fixedIndex]);
+          fixedIndex++;
+          
+          // Add any additional lines for insertions
+          for (let i = 0; i < addedCount; i++) {
+            if (fixedIndex < fixedLines.length) {
+              alignedOriginal.push(null); // Empty space in original
+              alignedFixed.push(fixedLines[fixedIndex]);
+              fixedIndex++;
+            }
+          }
+        } else {
+          alignedFixed.push(null);
+        }
+      } else {
+        // No changes for this line, copy as-is
+        if (originalIndex < originalLines.length) {
+          alignedOriginal.push(originalLines[originalIndex]);
+          originalIndex++;
+        } else {
+          alignedOriginal.push(null);
+        }
+
+        if (fixedIndex < fixedLines.length) {
+          alignedFixed.push(fixedLines[fixedIndex]);
+          fixedIndex++;
+        } else {
+          alignedFixed.push(null);
+        }
+      }
+    }
+
+    return {
+      originalLines: alignedOriginal,
+      fixedLines: alignedFixed
+    };
+  };
+
+  const highlightDifferencesWithActions = (originalLines: (string | null)[], fixedLines: (string | null)[], isOriginal: boolean) => {
+    if (!originalCode || !fixedCode || !highlightData) return [];
     
-    const codeLines = code.split('\n');
-    const changedLines = new Set<number>();
-    const addedLines = new Set<number>();
+    const linesToRender = isOriginal ? originalLines : fixedLines;
     const lineGroups = getLineGroups();
     
-    if (isOriginal) {
-      highlightData.changed_lines?.forEach((lineNum: number) => {
-        changedLines.add(lineNum - 1);
-      });
-    } else {
-      highlightData.changed_lines_fixed?.forEach((lineNum: number) => {
-        changedLines.add(lineNum - 1);
-      });
-      highlightData.added_lines?.forEach((lineNum: number) => {
-        addedLines.add(lineNum - 1);
-      });
-    }
-    
-    return codeLines.map((line, index) => {
+    return linesToRender.map((line, index) => {
       let className = '';
       const actualLineNumber = index + 1;
-      const lineKey = actualLineNumber.toString();
-      
-      // Find all related line keys for this line (including suffixes like 93a, 93b)
-      const relatedLineKeys = lineGroups[lineKey] || [];
-      const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
-      const primaryFix = allRelatedFixes[0];
-      
-      // Check if any related line has actual changes
-      const hasActualChanges = relatedLineKeys.some(key => {
-        const changeType = getLineChangeType(key, originalCode.split('\n'));
-        return changeType.type !== 'unchanged';
-      });
-      
-      // Check if this is a deleted line (exists in original but not in fixed)
-      const isDeletedLine = isOriginal && changedLines.has(index) && 
-        !fixedCode.split('\n')[index] && codeSnippets[lineKey];
-      
-      if (addedLines.has(index)) {
-        className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-      } else if (changedLines.has(index)) {
-        className = isOriginal 
-          ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
-          : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+      let lineKey = '';
+      let primaryFix: Fix | undefined;
+      let relatedLineKeys: string[] = [];
+      let hasActualChanges = false;
+      let showButtons = false;
+
+      // Find the corresponding line key and fix
+      if (line !== null) {
+        // Try to find the line key that corresponds to this visual line
+        for (const [key, snippetContent] of Object.entries(codeSnippets)) {
+          const keyLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
+          const isNewLine = /[a-z]$/.test(key);
+          
+          // For original lines, match by line number
+          if (isOriginal && !isNewLine && keyLineNum === actualLineNumber) {
+            lineKey = key;
+            break;
+          }
+          // For fixed lines, it's more complex due to line shifts
+          else if (!isOriginal) {
+            // This would need more sophisticated mapping
+            // For now, use similar logic but account for insertions
+            if (keyLineNum === actualLineNumber) {
+              lineKey = key;
+              break;
+            }
+          }
+        }
+
+        if (lineKey) {
+          const baseLineMatch = lineKey.match(/^(\d+)/);
+          if (baseLineMatch) {
+            const baseLine = baseLineMatch[1];
+            relatedLineKeys = lineGroups[baseLine] || [lineKey];
+            const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
+            primaryFix = allRelatedFixes[0];
+
+            hasActualChanges = relatedLineKeys.some(key => {
+              const changeType = getLineChangeType(key, originalCode.split('\n'));
+              return changeType.type !== 'unchanged';
+            });
+          }
+        }
       }
-      
-      // Show buttons for deleted lines in original view or changed lines in fixed view
-      const showButtons = (isOriginal && isDeletedLine) || 
-        (!isOriginal && hasActualChanges && !isDeletedLine);
+
+      // Apply styling based on line type
+      if (line === null) {
+        className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
+        line = isOriginal ? '(line removed)' : '(line added)';
+      } else {
+        const isDeletedLine = isOriginal && hasActualChanges && 
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
+        
+        const isAddedLine = !isOriginal && hasActualChanges &&
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
+          
+        const isModifiedLine = hasActualChanges && 
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
+
+        if (isAddedLine) {
+          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+        } else if (isDeletedLine) {
+          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+        } else if (isModifiedLine) {
+          className = isOriginal 
+            ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
+            : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+        }
+
+        showButtons = hasActualChanges && primaryFix;
+      }
       
       return (
         <div key={index} className={`${className} px-2 py-0.5 group relative`}>
           <div className="flex items-center justify-between">
             <span className="flex-1 font-mono text-xs">
-              {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
+              {line}
             </span>
             {showButtons && primaryFix && (
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2 shrink-0">
+              <div className="flex gap-1 ml-2 shrink-0">
                 {primaryFix.status === 'pending' ? (
                   <>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
+                      onClick={() => handleReviewAction(primaryFix.line_key, 'reject')}
                       className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
                     >
                       <XIcon className="w-3 h-3" />
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
+                      onClick={() => handleReviewAction(primaryFix.line_key, 'accept')}
                       className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
                     >
                       <Check className="w-3 h-3" />
@@ -571,7 +586,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     });
   };
 
-  // Function to compare original line with fixed snippet content
   const getLineChangeType = (lineKey: string, originalLines: string[]) => {
     const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
     const isNewLine = /[a-z]$/.test(lineKey);
@@ -608,7 +622,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return { type: 'unchanged', originalContent, fixedContent: snippetContent };
   };
 
-  // Get list of fixes that have actual changes (not just line number prefixes)
   const getActualChangedFixes = () => {
     if (!originalCode || !codeSnippets) return [];
     
@@ -619,7 +632,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     });
   };
 
-  // Navigation functions for actual changes only
   const navigateToNextChange = () => {
     const changedFixes = getActualChangedFixes();
     const currentChanged = changedFixes.find(fix => fix.line_key === currentFix?.line_key);
@@ -644,30 +656,122 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  // Accept/Reject all pending changes
-  const handleAcceptAll = () => {
-    const changedFixes = getActualChangedFixes();
-    const pendingLineKeys = changedFixes
-      .filter(fix => fix.status === 'pending')
-      .map(fix => fix.line_key);
+  const handleAcceptAll = async () => {
+    if (!state.projectId) return;
     
-    if (pendingLineKeys.length > 0) {
-      handleGroupReviewAction(pendingLineKeys, 'accept');
+    const changedFixes = getActualChangedFixes();
+    const allLineKeys = changedFixes.map(fix => fix.line_key);
+    
+    if (allLineKeys.length === 0) return;
+
+    try {
+      // Process all line keys
+      const promises = allLineKeys.map(lineKey => 
+        apiClient.reviewAction(state.projectId!, lineKey, 'accept')
+      );
+      
+      const responses = await Promise.all(promises);
+      const allSuccessful = responses.every(response => response.success);
+      
+      if (allSuccessful) {
+        // Update local state for all lines
+        const updatedFixes = fixes.map(fix => 
+          allLineKeys.includes(fix.line_key)
+            ? { ...fix, status: 'accepted' as const }
+            : fix
+        );
+        setFixes(updatedFixes);
+        
+        // Update summary - set all to accepted, clear others
+        if (summary) {
+          setSummary({
+            ...summary,
+            accepted_count: allLineKeys.length,
+            rejected_count: 0,
+            pending_count: 0
+          });
+        }
+        
+        toast({
+          title: "Success",
+          description: `All ${allLineKeys.length} fixes accepted`,
+        });
+        
+        // Reload diff
+        const diffResponse = await apiClient.getDiff(state.projectId);
+        if (diffResponse.success && diffResponse.data) {
+          setOriginalCode(diffResponse.data.original);
+          setFixedCode(diffResponse.data.fixed);
+          setHighlightData(diffResponse.data.highlight);
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to accept all fixes",
+        variant: "destructive",
+      });
     }
   };
 
-  const handleRejectAll = () => {
-    const changedFixes = getActualChangedFixes();
-    const pendingLineKeys = changedFixes
-      .filter(fix => fix.status === 'pending')
-      .map(fix => fix.line_key);
+  const handleRejectAll = async () => {
+    if (!state.projectId) return;
     
-    if (pendingLineKeys.length > 0) {
-      handleGroupReviewAction(pendingLineKeys, 'reject');
+    const changedFixes = getActualChangedFixes();
+    const allLineKeys = changedFixes.map(fix => fix.line_key);
+    
+    if (allLineKeys.length === 0) return;
+
+    try {
+      // Process all line keys
+      const promises = allLineKeys.map(lineKey => 
+        apiClient.reviewAction(state.projectId!, lineKey, 'reject')
+      );
+      
+      const responses = await Promise.all(promises);
+      const allSuccessful = responses.every(response => response.success);
+      
+      if (allSuccessful) {
+        // Update local state for all lines
+        const updatedFixes = fixes.map(fix => 
+          allLineKeys.includes(fix.line_key)
+            ? { ...fix, status: 'rejected' as const }
+            : fix
+        );
+        setFixes(updatedFixes);
+        
+        // Update summary - set all to rejected, clear others
+        if (summary) {
+          setSummary({
+            ...summary,
+            accepted_count: 0,
+            rejected_count: allLineKeys.length,
+            pending_count: 0
+          });
+        }
+        
+        toast({
+          title: "Success",
+          description: `All ${allLineKeys.length} fixes rejected`,
+        });
+        
+        // Reload diff
+        const diffResponse = await apiClient.getDiff(state.projectId);
+        if (diffResponse.success && diffResponse.data) {
+          setOriginalCode(diffResponse.data.original);
+          setFixedCode(diffResponse.data.fixed);
+          setHighlightData(diffResponse.data.highlight);
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reject all fixes",
+        variant: "destructive",
+      });
     }
   };
 
-  // Render inline diff view with accept/reject buttons for each change
   const renderInlineDiffView = () => {
     if (!originalCode || !codeSnippets) return <div>Loading...</div>;
     
@@ -784,35 +888,40 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     );
   };
 
-  const renderCodeBlock = (code: string, title: string, isOriginal?: boolean) => (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 p-3 border-b bg-muted">
-        <Code2 className="w-4 h-4" />
-        <span className="font-medium text-sm">{title}</span>
-      </div>
-      <div 
-        ref={isOriginal ? originalScrollRef : fixedScrollRef}
-        className="overflow-auto h-[500px]"
-        onScroll={(e) => handleScroll(e, !!isOriginal)}
-      >
-        <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-5">
-          <code className="block">
-            {code ? (
-              isOriginal !== undefined ? (
-                <div className="space-y-0">
-                  {highlightDifferencesWithActions(code, isOriginal)}
-                </div>
+  const renderCodeBlock = (code: string, title: string, isOriginal?: boolean) => {
+    const alignedDiff = createAlignedDiff(originalCode, fixedCode);
+    const linesToRender = isOriginal ? alignedDiff.originalLines : alignedDiff.fixedLines;
+    
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 p-3 border-b bg-muted">
+          <Code2 className="w-4 h-4" />
+          <span className="font-medium text-sm">{title}</span>
+        </div>
+        <div 
+          ref={isOriginal ? originalScrollRef : fixedScrollRef}
+          className="overflow-auto h-[500px]"
+          onScroll={(e) => handleScroll(e, !!isOriginal)}
+        >
+          <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-5">
+            <code className="block">
+              {code ? (
+                isOriginal !== undefined ? (
+                  <div className="space-y-0">
+                    {highlightDifferencesWithActions(linesToRender, alignedDiff.fixedLines, isOriginal)}
+                  </div>
+                ) : (
+                  code
+                )
               ) : (
-                code
-              )
-            ) : (
-              'Loading...'
-            )}
-          </code>
-        </pre>
+                'Loading...'
+              )}
+            </code>
+          </pre>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const currentFix = fixes[currentFixIndex];
 
