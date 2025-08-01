@@ -361,7 +361,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
   // Create aligned diff view that maintains line correspondence
   const createAlignedDiff = (originalCode: string, fixedCode: string) => {
-    if (!originalCode || !fixedCode) {
+    if (!originalCode || !fixedCode || !highlightData) {
       return {
         originalLines: originalCode?.split('\n') || [],
         fixedLines: fixedCode?.split('\n') || []
@@ -373,86 +373,78 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const alignedOriginal: (string | null)[] = [];
     const alignedFixed: (string | null)[] = [];
 
-    // Build a map of line changes from code snippets
-    const lineMap = new Map<number, {
-      deleted: boolean;
-      modified: boolean;
-      addedLines: string[];
-      originalLine: string;
-      fixedLine: string;
-    }>();
+    let originalIndex = 0;
+    let fixedIndex = 0;
 
-    // Process all code snippets to understand changes
+    // Process each line based on the highlight data
+    const changedLinesSet = new Set(highlightData.changed_lines || []);
+    const addedLinesSet = new Set(highlightData.added_lines || []);
+    const removedLinesSet = new Set(highlightData.removed_lines || []);
+
+    // Create a mapping of original line numbers to their changes
+    const lineChanges = new Map();
     Object.keys(codeSnippets).forEach(lineKey => {
-      const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
-      const isNewLine = /[a-z]$/.test(lineKey);
+      const lineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
       const changeType = getLineChangeType(lineKey, originalLines);
-      
-      if (!lineMap.has(lineNumber)) {
-        lineMap.set(lineNumber, {
-          deleted: false,
-          modified: false,
-          addedLines: [],
-          originalLine: originalLines[lineNumber - 1] || '',
-          fixedLine: ''
-        });
+      if (!lineChanges.has(lineNum)) {
+        lineChanges.set(lineNum, []);
       }
-      
-      const entry = lineMap.get(lineNumber)!;
-      
-      if (changeType.type === 'deleted') {
-        entry.deleted = true;
-      } else if (changeType.type === 'modified') {
-        entry.modified = true;
-        entry.fixedLine = codeSnippets[lineKey] || '';
-      } else if (changeType.type === 'added') {
-        entry.addedLines.push(codeSnippets[lineKey] || '');
-      }
+      lineChanges.get(lineNum).push({ lineKey, changeType });
     });
 
-    // Process original lines sequentially
-    let fixedIndex = 0;
-    
-    for (let originalLineNum = 1; originalLineNum <= originalLines.length; originalLineNum++) {
-      const entry = lineMap.get(originalLineNum);
-      const originalContent = originalLines[originalLineNum - 1];
+    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
+      const currentOriginalLine = originalIndex + 1;
       
-      if (entry) {
-        if (entry.deleted) {
-          // Deleted line: show in original, null in fixed
-          alignedOriginal.push(originalContent);
+      if (lineChanges.has(currentOriginalLine)) {
+        const changes = lineChanges.get(currentOriginalLine);
+        
+        // Handle original line
+        if (originalIndex < originalLines.length) {
+          alignedOriginal.push(originalLines[originalIndex]);
+          originalIndex++;
+        } else {
+          alignedOriginal.push(null);
+        }
+
+        // Handle fixed line(s) - may have multiple lines for additions
+        let addedCount = 0;
+        for (const change of changes) {
+          if (change.changeType.type === 'added') {
+            addedCount++;
+          }
+        }
+
+        if (fixedIndex < fixedLines.length) {
+          alignedFixed.push(fixedLines[fixedIndex]);
+          fixedIndex++;
+          
+          // Add any additional lines for insertions
+          for (let i = 0; i < addedCount; i++) {
+            if (fixedIndex < fixedLines.length) {
+              alignedOriginal.push(null); // Empty space in original
+              alignedFixed.push(fixedLines[fixedIndex]);
+              fixedIndex++;
+            }
+          }
+        } else {
           alignedFixed.push(null);
-        } else if (entry.modified) {
-          // Modified line: show both versions
-          alignedOriginal.push(originalContent);
-          alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
+        }
+      } else {
+        // No changes for this line, copy as-is
+        if (originalIndex < originalLines.length) {
+          alignedOriginal.push(originalLines[originalIndex]);
+          originalIndex++;
+        } else {
+          alignedOriginal.push(null);
+        }
+
+        if (fixedIndex < fixedLines.length) {
+          alignedFixed.push(fixedLines[fixedIndex]);
           fixedIndex++;
         } else {
-          // Regular line that might have additions after it
-          alignedOriginal.push(originalContent);
-          alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
-          fixedIndex++;
+          alignedFixed.push(null);
         }
-        
-        // Add any new lines after this original line
-        entry.addedLines.forEach(() => {
-          alignedOriginal.push(null);
-          alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
-          fixedIndex++;
-        });
-      } else {
-        // No changes to this line
-        alignedOriginal.push(originalContent);
-        alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
-        fixedIndex++;
       }
-    }
-
-    // Handle any remaining fixed lines
-    while (fixedIndex < fixedLines.length) {
-      alignedOriginal.push(null);
-      alignedFixed.push(fixedLines[fixedIndex]);
-      fixedIndex++;
     }
 
     return {
@@ -469,6 +461,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     return linesToRender.map((line, index) => {
       let className = '';
+      const actualLineNumber = index + 1;
       let lineKey = '';
       let primaryFix: Fix | undefined;
       let relatedLineKeys: string[] = [];
@@ -477,36 +470,21 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       // Find the corresponding line key and fix
       if (line !== null) {
-        // Map visual index back to original line numbers by counting non-null lines
-        let originalLineCount = 0;
-        let visualLineIndex = -1;
-        
-        for (let i = 0; i <= index; i++) {
-          if (linesToRender[i] !== null) {
-            if (isOriginal) {
-              originalLineCount++;
-              if (i === index) {
-                visualLineIndex = originalLineCount;
-              }
-            } else {
-              // For fixed side, need to account for the mapping
-              visualLineIndex = originalLineCount + 1;
-              originalLineCount++;
-            }
-          }
-        }
-        
-        // Find line key that matches this visual line
+        // Try to find the line key that corresponds to this visual line
         for (const [key, snippetContent] of Object.entries(codeSnippets)) {
           const keyLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
           const isNewLine = /[a-z]$/.test(key);
           
-          if (isOriginal && !isNewLine && keyLineNum === visualLineIndex) {
+          // For original lines, match by line number
+          if (isOriginal && !isNewLine && keyLineNum === actualLineNumber) {
             lineKey = key;
             break;
-          } else if (!isOriginal) {
-            // For fixed side, try to match by line content or line number
-            if (keyLineNum === visualLineIndex || (isNewLine && keyLineNum === Math.floor(visualLineIndex))) {
+          }
+          // For fixed lines, it's more complex due to line shifts
+          else if (!isOriginal) {
+            // This would need more sophisticated mapping
+            // For now, use similar logic but account for insertions
+            if (keyLineNum === actualLineNumber) {
               lineKey = key;
               break;
             }
@@ -531,36 +509,28 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       // Apply styling based on line type
       if (line === null) {
-        if (isOriginal) {
-          // Empty space in original for added lines
-          className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
-          line = '';
-        } else {
-          // Empty space in fixed for deleted lines - use red background
-          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500 text-gray-400';
-          line = '(line deleted)';
-        }
+        className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
+        line = isOriginal ? '(line removed)' : '(line added)';
       } else {
-        // Find change types for this line
-        const changeTypes = relatedLineKeys.map(key => getLineChangeType(key, originalCode.split('\n')));
-        const isDeletedLine = changeTypes.some(ct => ct.type === 'deleted');
-        const isAddedLine = changeTypes.some(ct => ct.type === 'added');
-        const isModifiedLine = changeTypes.some(ct => ct.type === 'modified');
+        const isDeletedLine = isOriginal && hasActualChanges && 
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
+        
+        const isAddedLine = !isOriginal && hasActualChanges &&
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
+          
+        const isModifiedLine = hasActualChanges && 
+          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
 
-        if (isDeletedLine) {
-          // Deleted lines: red on both sides
-          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
-        } else if (isAddedLine && !isOriginal) {
-          // New lines: green on fixed side only
+        if (isAddedLine) {
           className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+        } else if (isDeletedLine) {
+          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
         } else if (isModifiedLine) {
-          // Modified lines: red on original, yellow on fixed
           className = isOriginal 
             ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
             : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
         }
 
-        // Show inline controls only on fixed side for lines with actual changes
         showButtons = hasActualChanges && !!primaryFix && !isOriginal;
       }
       
@@ -621,52 +591,35 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const isNewLine = /[a-z]$/.test(lineKey);
     const snippetContent = codeSnippets[lineKey];
     
-    // Handle new lines (with suffix like 93a) - these are always additions
+    // Handle new lines (with suffix like 93a)
     if (isNewLine) {
       return { type: 'added', originalContent: '', fixedContent: snippetContent || '' };
     }
     
-    // Get original line content (handle out of bounds)
-    const originalContent = lineNumber > 0 && lineNumber <= originalLines.length 
-      ? originalLines[lineNumber - 1] 
-      : '';
+    // Get original line content
+    const originalContent = originalLines[lineNumber - 1] || '';
     
-    // Normalize content for comparison - remove line numbers and trim
-    const normalizeContent = (content: string) => {
-      if (!content) return '';
-      // Remove line number prefix (e.g., "123   " or "123	")
-      return content.replace(/^\d+\s*/, '').trim();
-    };
-    
-    const normalizedOriginal = normalizeContent(originalContent);
-    const normalizedSnippet = normalizeContent(snippetContent || '');
-    
-    // Determine if snippet is effectively empty
-    const snippetIsEmpty = !snippetContent || 
-                          snippetContent.trim() === '' || 
-                          normalizedSnippet === '';
-    
-    const originalIsEmpty = normalizedOriginal === '';
-    
-    // Decision matrix for change types:
-    if (originalIsEmpty && snippetIsEmpty) {
-      // Both empty → no change
-      return { type: 'unchanged', originalContent, fixedContent: snippetContent || '' };
-    } else if (!originalIsEmpty && snippetIsEmpty) {
-      // Original has content, snippet is empty → deleted
-      return { type: 'deleted', originalContent, fixedContent: '' };
-    } else if (originalIsEmpty && !snippetIsEmpty) {
-      // Original is empty, snippet has content → this shouldn't happen for numbered lines
-      // but treat as modified for safety
-      return { type: 'modified', originalContent, fixedContent: snippetContent };
-    } else {
-      // Both have content, compare them
-      if (normalizedOriginal === normalizedSnippet) {
-        return { type: 'unchanged', originalContent, fixedContent: snippetContent };
+    // Handle deleted lines - check if snippet is empty AND original line was not empty
+    if (snippetContent === "" || snippetContent === null || snippetContent === undefined) {
+      // Only consider it deleted if the original line had content
+      if (originalContent.trim() !== "") {
+        return { type: 'deleted', originalContent, fixedContent: '' };
       } else {
-        return { type: 'modified', originalContent, fixedContent: snippetContent };
+        // Both original and snippet are empty - no actual change
+        return { type: 'unchanged', originalContent, fixedContent: snippetContent || '' };
       }
     }
+    
+    // Remove line number prefixes from both for comparison
+    const cleanOriginal = originalContent.replace(/^\d+\s*/, '').trim();
+    const cleanFixed = (snippetContent || '').replace(/^\d+\s*/, '').trim();
+    
+    // Compare actual content
+    if (cleanOriginal !== cleanFixed) {
+      return { type: 'modified', originalContent, fixedContent: snippetContent };
+    }
+    
+    return { type: 'unchanged', originalContent, fixedContent: snippetContent };
   };
 
   const getActualChangedFixes = () => {
