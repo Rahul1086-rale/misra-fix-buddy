@@ -59,6 +59,12 @@ class ReviewManager:
         self.accepted_lines.discard(line_key)  # Remove from accepted if it was there
         self._save_review_state()
     
+    def reset_line(self, line_key: str):
+        """Reset a specific line fix to pending state by removing it from both sets"""
+        self.accepted_lines.discard(line_key)
+        self.rejected_lines.discard(line_key)
+        self._save_review_state()
+    
     def get_line_status(self, line_key: str) -> str:
         """Get the review status of a line: 'accepted', 'rejected', or 'pending'"""
         if line_key in self.accepted_lines:

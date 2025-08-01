@@ -216,7 +216,7 @@ class ApiClient {
     });
   }
 
-  async reviewAction(projectId: string, line_key: string, action: 'accept' | 'reject'): Promise<ApiResponse<{
+  async reviewAction(projectId: string, line_key: string, action: 'accept' | 'reject' | 'reset'): Promise<ApiResponse<{
     success: boolean;
     message: string;
   }>> {

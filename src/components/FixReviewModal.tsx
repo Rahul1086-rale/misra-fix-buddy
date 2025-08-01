@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Eye, Code2, Check, X as XIcon, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -115,14 +116,25 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Update summary
         if (summary) {
+          const currentFix = fixes.find(fix => fix.line_key === line_key);
           const newSummary = { ...summary };
-          if (action === 'accept') {
-            newSummary.accepted_count += 1;
-            newSummary.pending_count -= 1;
+          
+          // Adjust counts based on previous state
+          if (currentFix?.status === 'accepted') {
+            newSummary.accepted_count -= 1;
+          } else if (currentFix?.status === 'rejected') {
+            newSummary.rejected_count -= 1;
           } else {
-            newSummary.rejected_count += 1;
             newSummary.pending_count -= 1;
           }
+          
+          // Add to new state
+          if (action === 'accept') {
+            newSummary.accepted_count += 1;
+          } else {
+            newSummary.rejected_count += 1;
+          }
+          
           setSummary(newSummary);
         }
         
@@ -195,14 +207,34 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         // Update summary
         if (summary) {
           const newSummary = { ...summary };
-          const changeCount = lineKeys.length;
+          
+          // Count changes by previous status
+          let pendingToChange = 0;
+          let acceptedToChange = 0;
+          let rejectedToChange = 0;
+          
+          lineKeys.forEach(lineKey => {
+            const currentFix = fixes.find(fix => fix.line_key === lineKey);
+            if (currentFix?.status === 'pending') {
+              pendingToChange += 1;
+            } else if (currentFix?.status === 'accepted') {
+              acceptedToChange += 1;
+            } else if (currentFix?.status === 'rejected') {
+              rejectedToChange += 1;
+            }
+          });
+          
+          // Adjust counts
+          newSummary.pending_count -= pendingToChange;
+          newSummary.accepted_count -= acceptedToChange;
+          newSummary.rejected_count -= rejectedToChange;
+          
           if (action === 'accept') {
-            newSummary.accepted_count += changeCount;
-            newSummary.pending_count -= changeCount;
+            newSummary.accepted_count += lineKeys.length;
           } else {
-            newSummary.rejected_count += changeCount;
-            newSummary.pending_count -= changeCount;
+            newSummary.rejected_count += lineKeys.length;
           }
+          
           setSummary(newSummary);
         }
         
@@ -260,35 +292,43 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const currentFix = fixes.find(fix => fix.line_key === lineKey);
       if (!currentFix || currentFix.status === 'pending') return;
       
-      // Simply update local state to pending - we'll handle backend sync through reload
-      const updatedFixes = fixes.map(fix => 
-        fix.line_key === lineKey 
-          ? { ...fix, status: 'pending' as const }
-          : fix
-      );
-      setFixes(updatedFixes);
+      // Call the API to actually remove the entry from review JSON
+      const response = await apiClient.reviewAction(state.projectId, lineKey, 'reset');
       
-      // Update summary
-      if (summary) {
-        const newSummary = { ...summary };
-        if (currentFix.status === 'accepted') {
-          newSummary.accepted_count -= 1;
-        } else {
-          newSummary.rejected_count -= 1;
+      if (response.success) {
+        // Update local state to pending
+        const updatedFixes = fixes.map(fix => 
+          fix.line_key === lineKey 
+            ? { ...fix, status: 'pending' as const }
+            : fix
+        );
+        setFixes(updatedFixes);
+        
+        // Update summary
+        if (summary) {
+          const newSummary = { ...summary };
+          if (currentFix.status === 'accepted') {
+            newSummary.accepted_count -= 1;
+          } else {
+            newSummary.rejected_count -= 1;
+          }
+          newSummary.pending_count += 1;
+          setSummary(newSummary);
         }
-        newSummary.pending_count += 1;
-        setSummary(newSummary);
+        
+        toast({
+          title: "Success",
+          description: "Fix reset to pending status",
+        });
+        
+        // Reload diff to show updated changes
+        const diffResponse = await apiClient.getDiff(state.projectId);
+        if (diffResponse.success && diffResponse.data) {
+          setOriginalCode(diffResponse.data.original);
+          setFixedCode(diffResponse.data.fixed);
+          setHighlightData(diffResponse.data.highlight);
+        }
       }
-      
-      toast({
-        title: "Success",
-        description: "Fix reset to pending status",
-      });
-      
-      // Force a re-render to show accept/reject buttons
-      setTimeout(() => {
-        setFixes([...updatedFixes]);
-      }, 50);
       
     } catch (error) {
       toast({
@@ -535,33 +575,37 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const getLineChangeType = (lineKey: string, originalLines: string[]) => {
     const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
     const isNewLine = /[a-z]$/.test(lineKey);
-    const isDeletedLine = codeSnippets[lineKey] === "";
+    const snippetContent = codeSnippets[lineKey];
     
+    // Handle new lines (with suffix like 93a)
     if (isNewLine) {
-      return { type: 'added', originalContent: '', fixedContent: codeSnippets[lineKey] || '' };
+      return { type: 'added', originalContent: '', fixedContent: snippetContent || '' };
     }
     
-    if (isDeletedLine) {
-      const originalContent = originalLines[lineNumber - 1]?.trim() || '';
-      return { type: 'deleted', originalContent, fixedContent: '' };
-    }
+    // Get original line content
+    const originalContent = originalLines[lineNumber - 1] || '';
     
-    const originalContent = originalLines[lineNumber - 1]?.trim() || '';
-    const fixedContent = codeSnippets[lineKey]?.trim() || '';
+    // Handle deleted lines - check if snippet is empty AND original line was not empty
+    if (snippetContent === "" || snippetContent === null || snippetContent === undefined) {
+      // Only consider it deleted if the original line had content
+      if (originalContent.trim() !== "") {
+        return { type: 'deleted', originalContent, fixedContent: '' };
+      } else {
+        // Both original and snippet are empty - no actual change
+        return { type: 'unchanged', originalContent, fixedContent: snippetContent || '' };
+      }
+    }
     
     // Remove line number prefixes from both for comparison
     const cleanOriginal = originalContent.replace(/^\d+\s*/, '').trim();
-    const cleanFixed = fixedContent.replace(/^\d+\s*/, '').trim();
+    const cleanFixed = (snippetContent || '').replace(/^\d+\s*/, '').trim();
     
-    if (!originalContent && fixedContent) {
-      return { type: 'added', originalContent: '', fixedContent };
+    // Compare actual content
+    if (cleanOriginal !== cleanFixed) {
+      return { type: 'modified', originalContent, fixedContent: snippetContent };
     }
     
-    if (cleanOriginal !== cleanFixed && fixedContent) {
-      return { type: 'modified', originalContent, fixedContent };
-    }
-    
-    return { type: 'unchanged', originalContent, fixedContent };
+    return { type: 'unchanged', originalContent, fixedContent: snippetContent };
   };
 
   // Get list of fixes that have actual changes (not just line number prefixes)
