@@ -152,7 +152,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         setTimeout(() => {
           const changedFixes = getActualChangedFixes();
           const currentChanged = changedFixes.find(fix => fix.line_key === fixes[currentFixIndex]?.line_key);
-          const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+          const currentChangedIndex = currentChanged ? changedFixes.indexOf(currentChanged) : -1;
           
           // Find next pending fix with actual changes
           const nextPendingFix = changedFixes
@@ -496,7 +496,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           if (baseLineMatch) {
             const baseLine = baseLineMatch[1];
             relatedLineKeys = lineGroups[baseLine] || [lineKey];
-            const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
+            const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean) as Fix[];
             primaryFix = allRelatedFixes[0];
 
             hasActualChanges = relatedLineKeys.some(key => {
@@ -531,7 +531,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
         }
 
-        showButtons = hasActualChanges && primaryFix;
+        showButtons = hasActualChanges && !!primaryFix;
       }
       
       return (
@@ -548,7 +548,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleReviewAction(primaryFix.line_key, 'reject')}
-                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs hover:bg-transparent"
                     >
                       <XIcon className="w-3 h-3" />
                     </Button>
@@ -564,7 +564,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                   <>
                     <Badge 
                       variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
-                      className="text-xs h-6"
+                      className="text-xs h-6 hover:bg-transparent cursor-default"
                     >
                       {primaryFix.status}
                     </Badge>
@@ -572,7 +572,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleSingleLineReset(primaryFix.line_key)}
-                      className="h-6 px-2 text-xs"
+                      className="h-6 px-2 text-xs hover:bg-transparent"
                     >
                       <RotateCcw className="w-3 h-3" />
                     </Button>
@@ -635,7 +635,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const navigateToNextChange = () => {
     const changedFixes = getActualChangedFixes();
     const currentChanged = changedFixes.find(fix => fix.line_key === currentFix?.line_key);
-    const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+    const currentChangedIndex = currentChanged ? changedFixes.indexOf(currentChanged) : -1;
     
     if (currentChangedIndex < changedFixes.length - 1) {
       const nextFix = changedFixes[currentChangedIndex + 1];
@@ -647,7 +647,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const navigateToPreviousChange = () => {
     const changedFixes = getActualChangedFixes();
     const currentChanged = changedFixes.find(fix => fix.line_key === currentFix?.line_key);
-    const currentChangedIndex = changedFixes.indexOf(currentChanged!);
+    const currentChangedIndex = currentChanged ? changedFixes.indexOf(currentChanged) : -1;
     
     if (currentChangedIndex > 0) {
       const prevFix = changedFixes[currentChangedIndex - 1];
