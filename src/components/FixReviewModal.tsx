@@ -565,36 +565,26 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const lineNumber = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
     const isNewLine = /[a-z]$/.test(lineKey);
     
-    // For new lines (with suffix like 93a, 93b), these are always additions
     if (isNewLine) {
       return { type: 'added', originalContent: '', fixedContent: codeSnippets[lineKey] || '' };
     }
     
     const originalContent = originalLines[lineNumber - 1]?.trim() || '';
-    const snippetContent = codeSnippets[lineKey]?.trim() || '';
+    const fixedContent = codeSnippets[lineKey]?.trim() || '';
     
-    // If there's no snippet for this line, it means line wasn't changed
-    if (!codeSnippets[lineKey]) {
-      return { type: 'unchanged', originalContent, fixedContent: originalContent };
+    if (!originalContent && fixedContent) {
+      return { type: 'added', originalContent: '', fixedContent };
     }
     
-    // If snippet content is empty but original exists, it's a deletion
-    if (!snippetContent && originalContent) {
+    if (originalContent && !fixedContent) {
       return { type: 'deleted', originalContent, fixedContent: '' };
     }
     
-    // If original content is empty but snippet exists, it's an addition
-    if (!originalContent && snippetContent) {
-      return { type: 'added', originalContent: '', fixedContent: snippetContent };
+    if (originalContent !== fixedContent) {
+      return { type: 'modified', originalContent, fixedContent };
     }
     
-    // Compare original content with snippet content to detect actual changes
-    if (originalContent !== snippetContent) {
-      return { type: 'modified', originalContent, fixedContent: snippetContent };
-    }
-    
-    // Content is the same, so no real change
-    return { type: 'unchanged', originalContent, fixedContent: snippetContent };
+    return { type: 'unchanged', originalContent, fixedContent };
   };
 
   // Render inline diff view with accept/reject buttons for each change
