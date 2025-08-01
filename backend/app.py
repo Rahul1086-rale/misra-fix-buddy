@@ -119,7 +119,7 @@ class DiffResponse(BaseModel):
 class ReviewActionRequest(BaseModel):
     projectId: str
     line_key: str
-    action: str  # 'accept' or 'reject'
+    action: str  # 'accept', 'reject', or 'reset'
 
 class NavigationRequest(BaseModel):
     projectId: str
@@ -625,8 +625,10 @@ async def review_action(request: ReviewActionRequest):
             review_manager.accept_line(line_key)
         elif action == "reject":
             review_manager.reject_line(line_key)
+        elif action == "reset":
+            review_manager.reset_line(line_key)
         else:
-            raise HTTPException(status_code=400, detail="Invalid action. Use 'accept' or 'reject'")
+            raise HTTPException(status_code=400, detail="Invalid action. Use 'accept', 'reject', or 'reset'")
         
         # Update temporary files with only accepted changes
         session = sessions[project_id]

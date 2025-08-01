@@ -531,7 +531,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
         }
 
-        showButtons = hasActualChanges && !!primaryFix;
+        showButtons = hasActualChanges && !!primaryFix && !isOriginal;
       }
       
       return (
@@ -548,7 +548,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleReviewAction(primaryFix.line_key, 'reject')}
-                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs hover:bg-transparent"
+                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
                     >
                       <XIcon className="w-3 h-3" />
                     </Button>
@@ -564,7 +564,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                   <>
                     <Badge 
                       variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
-                      className="text-xs h-6 hover:bg-transparent cursor-default"
+                      className="text-xs h-6 cursor-default"
                     >
                       {primaryFix.status}
                     </Badge>
@@ -572,7 +572,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleSingleLineReset(primaryFix.line_key)}
-                      className="h-6 px-2 text-xs hover:bg-transparent"
+                      className="h-6 px-2 text-xs"
                     >
                       <RotateCcw className="w-3 h-3" />
                     </Button>
