@@ -201,10 +201,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           const newSummary = { ...summary };
           if (currentFix.status === 'accepted') {
             newSummary.accepted_count -= 1;
+            newSummary.pending_count += 1;
           } else if (currentFix.status === 'rejected') {
             newSummary.rejected_count -= 1;
+            newSummary.pending_count += 1;
           }
-          newSummary.pending_count += 1;
           setSummary(newSummary);
         }
         
@@ -224,6 +225,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         throw new Error(response.error || 'Failed to reset fix');
       }
     } catch (error) {
+      console.error('Reset error:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to reset fix",
@@ -507,31 +509,32 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         }
       }
 
-      // Apply styling based on line type
+      // Apply styling based on line type with new color scheme
       if (line === null) {
         className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
         line = isOriginal ? '(line removed)' : '(line added)';
       } else {
-        const isDeletedLine = isOriginal && hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
+        const changeType = lineKey ? getLineChangeType(lineKey, originalCode.split('\n')) : { type: 'unchanged' };
         
-        const isAddedLine = !isOriginal && hasActualChanges &&
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
-          
-        const isModifiedLine = hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
-
-        if (isAddedLine) {
-          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-        } else if (isDeletedLine) {
+        if (changeType.type === 'deleted') {
+          // Deleted lines - red on both sides
           className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
-        } else if (isModifiedLine) {
-          className = isOriginal 
-            ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
-            : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+        } else if (changeType.type === 'added') {
+          // New lines - green on fixed side only
+          if (!isOriginal) {
+            className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+          }
+        } else if (changeType.type === 'modified') {
+          // Modified lines - red on original, yellow on fixed
+          if (isOriginal) {
+            className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+          } else {
+            className = 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+          }
         }
 
-        showButtons = hasActualChanges && !!primaryFix;
+        // Show buttons only on fixed side for lines with actual changes
+        showButtons = hasActualChanges && !!primaryFix && !isOriginal;
       }
       
       return (
@@ -660,33 +663,33 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     if (!state.projectId) return;
     
     const changedFixes = getActualChangedFixes();
-    const allLineKeys = changedFixes.map(fix => fix.line_key);
     
-    if (allLineKeys.length === 0) return;
+    if (changedFixes.length === 0) return;
 
     try {
-      // Process all line keys
-      const promises = allLineKeys.map(lineKey => 
-        apiClient.reviewAction(state.projectId!, lineKey, 'accept')
+      // Process all changed line keys
+      const promises = changedFixes.map(fix => 
+        apiClient.reviewAction(state.projectId!, fix.line_key, 'accept')
       );
       
       const responses = await Promise.all(promises);
       const allSuccessful = responses.every(response => response.success);
       
       if (allSuccessful) {
-        // Update local state for all lines
+        // Update local state for all changed lines
+        const changedLineKeys = changedFixes.map(fix => fix.line_key);
         const updatedFixes = fixes.map(fix => 
-          allLineKeys.includes(fix.line_key)
+          changedLineKeys.includes(fix.line_key)
             ? { ...fix, status: 'accepted' as const }
             : fix
         );
         setFixes(updatedFixes);
         
-        // Update summary - set all to accepted, clear others
+        // Update summary
         if (summary) {
           setSummary({
             ...summary,
-            accepted_count: allLineKeys.length,
+            accepted_count: changedFixes.length,
             rejected_count: 0,
             pending_count: 0
           });
@@ -694,7 +697,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         toast({
           title: "Success",
-          description: `All ${allLineKeys.length} fixes accepted`,
+          description: `All ${changedFixes.length} fixes accepted`,
         });
         
         // Reload diff
@@ -718,41 +721,41 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     if (!state.projectId) return;
     
     const changedFixes = getActualChangedFixes();
-    const allLineKeys = changedFixes.map(fix => fix.line_key);
     
-    if (allLineKeys.length === 0) return;
+    if (changedFixes.length === 0) return;
 
     try {
-      // Process all line keys
-      const promises = allLineKeys.map(lineKey => 
-        apiClient.reviewAction(state.projectId!, lineKey, 'reject')
+      // Process all changed line keys
+      const promises = changedFixes.map(fix => 
+        apiClient.reviewAction(state.projectId!, fix.line_key, 'reject')
       );
       
       const responses = await Promise.all(promises);
       const allSuccessful = responses.every(response => response.success);
       
       if (allSuccessful) {
-        // Update local state for all lines
+        // Update local state for all changed lines
+        const changedLineKeys = changedFixes.map(fix => fix.line_key);
         const updatedFixes = fixes.map(fix => 
-          allLineKeys.includes(fix.line_key)
+          changedLineKeys.includes(fix.line_key)
             ? { ...fix, status: 'rejected' as const }
             : fix
         );
         setFixes(updatedFixes);
         
-        // Update summary - set all to rejected, clear others
+        // Update summary
         if (summary) {
           setSummary({
             ...summary,
             accepted_count: 0,
-            rejected_count: allLineKeys.length,
+            rejected_count: changedFixes.length,
             pending_count: 0
           });
         }
         
         toast({
           title: "Success",
-          description: `All ${allLineKeys.length} fixes rejected`,
+          description: `All ${changedFixes.length} fixes rejected`,
         });
         
         // Reload diff
