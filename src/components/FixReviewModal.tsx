@@ -184,7 +184,9 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     if (!state.projectId) return;
     
     try {
+      console.log('Resetting line:', lineKey);
       const response = await apiClient.reviewAction(state.projectId, lineKey, 'reset');
+      console.log('Reset response:', response);
       
       if (response.success) {
         // Update local state to pending
@@ -201,10 +203,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           const newSummary = { ...summary };
           if (currentFix.status === 'accepted') {
             newSummary.accepted_count -= 1;
+            newSummary.pending_count += 1;
           } else if (currentFix.status === 'rejected') {
             newSummary.rejected_count -= 1;
+            newSummary.pending_count += 1;
           }
-          newSummary.pending_count += 1;
           setSummary(newSummary);
         }
         
@@ -221,9 +224,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setHighlightData(diffResponse.data.highlight);
         }
       } else {
+        console.error('Reset failed:', response.error);
         throw new Error(response.error || 'Failed to reset fix');
       }
     } catch (error) {
+      console.error('Reset error:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to reset fix",
@@ -359,7 +364,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return groups;
   };
 
-  // Create aligned diff view that maintains line correspondence
+  // Create aligned diff view that maintains line correspondence for removed lines
   const createAlignedDiff = (originalCode: string, fixedCode: string) => {
     if (!originalCode || !fixedCode || !highlightData) {
       return {
@@ -373,15 +378,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const alignedOriginal: (string | null)[] = [];
     const alignedFixed: (string | null)[] = [];
 
-    let originalIndex = 0;
-    let fixedIndex = 0;
-
-    // Process each line based on the highlight data
-    const changedLinesSet = new Set(highlightData.changed_lines || []);
-    const addedLinesSet = new Set(highlightData.added_lines || []);
-    const removedLinesSet = new Set(highlightData.removed_lines || []);
-
-    // Create a mapping of original line numbers to their changes
+    // Create mapping of line changes
     const lineChanges = new Map();
     Object.keys(codeSnippets).forEach(lineKey => {
       const lineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
@@ -392,42 +389,38 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       lineChanges.get(lineNum).push({ lineKey, changeType });
     });
 
+    let originalIndex = 0;
+    let fixedIndex = 0;
+
     while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
       const currentOriginalLine = originalIndex + 1;
       
       if (lineChanges.has(currentOriginalLine)) {
         const changes = lineChanges.get(currentOriginalLine);
+        const hasDeletedLine = changes.some((change: any) => change.changeType.type === 'deleted');
         
-        // Handle original line
-        if (originalIndex < originalLines.length) {
-          alignedOriginal.push(originalLines[originalIndex]);
-          originalIndex++;
-        } else {
-          alignedOriginal.push(null);
-        }
-
-        // Handle fixed line(s) - may have multiple lines for additions
-        let addedCount = 0;
-        for (const change of changes) {
-          if (change.changeType.type === 'added') {
-            addedCount++;
-          }
-        }
-
-        if (fixedIndex < fixedLines.length) {
-          alignedFixed.push(fixedLines[fixedIndex]);
-          fixedIndex++;
-          
-          // Add any additional lines for insertions
-          for (let i = 0; i < addedCount; i++) {
-            if (fixedIndex < fixedLines.length) {
-              alignedOriginal.push(null); // Empty space in original
-              alignedFixed.push(fixedLines[fixedIndex]);
-              fixedIndex++;
-            }
+        if (hasDeletedLine) {
+          // For deleted lines, show original line and add null for fixed
+          if (originalIndex < originalLines.length) {
+            alignedOriginal.push(originalLines[originalIndex]);
+            alignedFixed.push(null); // Empty space in fixed for deleted line
+            originalIndex++;
           }
         } else {
-          alignedFixed.push(null);
+          // For other changes (modified, added), align normally
+          if (originalIndex < originalLines.length) {
+            alignedOriginal.push(originalLines[originalIndex]);
+            originalIndex++;
+          } else {
+            alignedOriginal.push(null);
+          }
+
+          if (fixedIndex < fixedLines.length) {
+            alignedFixed.push(fixedLines[fixedIndex]);
+            fixedIndex++;
+          } else {
+            alignedFixed.push(null);
+          }
         }
       } else {
         // No changes for this line, copy as-is
@@ -473,21 +466,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         // Try to find the line key that corresponds to this visual line
         for (const [key, snippetContent] of Object.entries(codeSnippets)) {
           const keyLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
-          const isNewLine = /[a-z]$/.test(key);
           
-          // For original lines, match by line number
-          if (isOriginal && !isNewLine && keyLineNum === actualLineNumber) {
+          // For both original and fixed lines, match by line number
+          if (keyLineNum === actualLineNumber) {
             lineKey = key;
             break;
-          }
-          // For fixed lines, it's more complex due to line shifts
-          else if (!isOriginal) {
-            // This would need more sophisticated mapping
-            // For now, use similar logic but account for insertions
-            if (keyLineNum === actualLineNumber) {
-              lineKey = key;
-              break;
-            }
           }
         }
 
@@ -507,31 +490,36 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         }
       }
 
-      // Apply styling based on line type
+      // Apply styling based on line type and change type
       if (line === null) {
         className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
         line = isOriginal ? '(line removed)' : '(line added)';
       } else {
-        const isDeletedLine = isOriginal && hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
-        
-        const isAddedLine = !isOriginal && hasActualChanges &&
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
+        if (hasActualChanges && relatedLineKeys.length > 0) {
+          const changeType = getLineChangeType(relatedLineKeys[0], originalCode.split('\n'));
           
-        const isModifiedLine = hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
-
-        if (isAddedLine) {
-          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-        } else if (isDeletedLine) {
-          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
-        } else if (isModifiedLine) {
-          className = isOriginal 
-            ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
-            : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+          switch (changeType.type) {
+            case 'deleted':
+              // Deleted lines: red on both sides
+              className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+              break;
+            case 'modified':
+              // Modified lines: red on original, yellow on fixed
+              className = isOriginal 
+                ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
+                : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+              break;
+            case 'added':
+              // New lines: green on fixed side only, no snippet on original
+              if (!isOriginal) {
+                className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
+              }
+              break;
+          }
         }
 
-        showButtons = hasActualChanges && !!primaryFix;
+        // Only show buttons on fixed file side and for lines with actual changes
+        showButtons = !isOriginal && hasActualChanges && !!primaryFix;
       }
       
       return (
@@ -548,7 +536,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleReviewAction(primaryFix.line_key, 'reject')}
-                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs hover:bg-transparent"
+                      className="text-red-600 h-6 px-2 text-xs border-red-200 hover:bg-red-50"
                     >
                       <XIcon className="w-3 h-3" />
                     </Button>
@@ -564,7 +552,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                   <>
                     <Badge 
                       variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
-                      className="text-xs h-6 hover:bg-transparent cursor-default"
+                      className="text-xs h-6 cursor-default pointer-events-none"
                     >
                       {primaryFix.status}
                     </Badge>
@@ -572,7 +560,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       variant="outline"
                       size="sm"
                       onClick={() => handleSingleLineReset(primaryFix.line_key)}
-                      className="h-6 px-2 text-xs hover:bg-transparent"
+                      className="h-6 px-2 text-xs border-gray-200"
                     >
                       <RotateCcw className="w-3 h-3" />
                     </Button>
