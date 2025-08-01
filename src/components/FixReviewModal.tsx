@@ -373,60 +373,48 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const alignedOriginal: (string | null)[] = [];
     const alignedFixed: (string | null)[] = [];
 
-    // Create a mapping of original line numbers to their changes
+    // Create a comprehensive line change map
     const lineChanges = new Map();
     Object.keys(codeSnippets).forEach(lineKey => {
       const lineNum = parseInt(lineKey.match(/^(\d+)/)?.[1] || '0');
       const changeType = getLineChangeType(lineKey, originalLines);
+      
       if (!lineChanges.has(lineNum)) {
-        lineChanges.set(lineNum, []);
+        lineChanges.set(lineNum, {
+          deleted: false,
+          modified: false,
+          added: [],
+          originalProcessed: false,
+          fixedProcessed: false
+        });
       }
-      lineChanges.get(lineNum).push({ lineKey, changeType });
+      
+      const change = lineChanges.get(lineNum);
+      if (changeType.type === 'deleted') {
+        change.deleted = true;
+      } else if (changeType.type === 'modified') {
+        change.modified = true;
+      } else if (changeType.type === 'added') {
+        change.added.push(lineKey);
+      }
     });
-
-    // Sort line numbers for sequential processing
-    const sortedLineNumbers = Array.from(new Set([
-      ...Array.from({ length: originalLines.length }, (_, i) => i + 1),
-      ...Object.keys(codeSnippets).map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0'))
-    ])).sort((a, b) => a - b);
 
     let originalIndex = 0;
     let fixedIndex = 0;
+    const maxLines = Math.max(originalLines.length, fixedLines.length);
 
-    for (const lineNum of sortedLineNumbers) {
-      const hasChanges = lineChanges.has(lineNum);
-      const changes = hasChanges ? lineChanges.get(lineNum) : [];
+    // Process all original lines sequentially
+    for (let lineNum = 1; lineNum <= originalLines.length; lineNum++) {
+      const change = lineChanges.get(lineNum);
       
-      // Advance to current line in original
-      while (originalIndex < lineNum - 1 && originalIndex < originalLines.length) {
-        alignedOriginal.push(originalLines[originalIndex]);
-        alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
-        originalIndex++;
-        fixedIndex++;
-      }
-
-      if (hasChanges) {
-        // Process changes for this line
-        const deletedChanges = changes.filter(c => c.changeType.type === 'deleted');
-        const modifiedChanges = changes.filter(c => c.changeType.type === 'modified');
-        const addedChanges = changes.filter(c => c.changeType.type === 'added');
-
-        if (deletedChanges.length > 0) {
-          // Deleted line: show in original, null in fixed
-          if (originalIndex < originalLines.length) {
-            alignedOriginal.push(originalLines[originalIndex]);
-            alignedFixed.push(null);
-            originalIndex++;
-          }
-        } else if (modifiedChanges.length > 0) {
+      if (change) {
+        if (change.deleted) {
+          // Deleted line: show in original, empty in fixed
+          alignedOriginal.push(originalLines[lineNum - 1]);
+          alignedFixed.push(null);
+        } else if (change.modified) {
           // Modified line: show both versions
-          if (originalIndex < originalLines.length) {
-            alignedOriginal.push(originalLines[originalIndex]);
-            originalIndex++;
-          } else {
-            alignedOriginal.push(null);
-          }
-          
+          alignedOriginal.push(originalLines[lineNum - 1]);
           if (fixedIndex < fixedLines.length) {
             alignedFixed.push(fixedLines[fixedIndex]);
             fixedIndex++;
@@ -434,14 +422,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             alignedFixed.push(null);
           }
         } else {
-          // Normal line (might have additions after it)
-          if (originalIndex < originalLines.length) {
-            alignedOriginal.push(originalLines[originalIndex]);
-            originalIndex++;
-          } else {
-            alignedOriginal.push(null);
-          }
-          
+          // Line with additions after it
+          alignedOriginal.push(originalLines[lineNum - 1]);
           if (fixedIndex < fixedLines.length) {
             alignedFixed.push(fixedLines[fixedIndex]);
             fixedIndex++;
@@ -450,8 +432,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           }
         }
 
-        // Handle added lines (show null in original, content in fixed)
-        for (const addedChange of addedChanges) {
+        // Handle added lines after this original line
+        for (const addedLineKey of change.added) {
           alignedOriginal.push(null);
           if (fixedIndex < fixedLines.length) {
             alignedFixed.push(fixedLines[fixedIndex]);
@@ -461,14 +443,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           }
         }
       } else {
-        // No changes, advance both
-        if (originalIndex < originalLines.length) {
-          alignedOriginal.push(originalLines[originalIndex]);
-          originalIndex++;
-        } else {
-          alignedOriginal.push(null);
-        }
-        
+        // No changes for this line
+        alignedOriginal.push(originalLines[lineNum - 1]);
         if (fixedIndex < fixedLines.length) {
           alignedFixed.push(fixedLines[fixedIndex]);
           fixedIndex++;
@@ -478,11 +454,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       }
     }
 
-    // Handle any remaining lines
-    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
-      alignedOriginal.push(originalIndex < originalLines.length ? originalLines[originalIndex] : null);
-      alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
-      originalIndex++;
+    // Handle any remaining fixed lines that don't correspond to original lines
+    while (fixedIndex < fixedLines.length) {
+      alignedOriginal.push(null);
+      alignedFixed.push(fixedLines[fixedIndex]);
       fixedIndex++;
     }
 
@@ -500,7 +475,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     return linesToRender.map((line, index) => {
       let className = '';
-      const actualLineNumber = index + 1;
       let lineKey = '';
       let primaryFix: Fix | undefined;
       let relatedLineKeys: string[] = [];
@@ -509,21 +483,36 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       // Find the corresponding line key and fix
       if (line !== null) {
-        // Try to find the line key that corresponds to this visual line
+        // Map visual index back to original line numbers by counting non-null lines
+        let originalLineCount = 0;
+        let visualLineIndex = -1;
+        
+        for (let i = 0; i <= index; i++) {
+          if (linesToRender[i] !== null) {
+            if (isOriginal) {
+              originalLineCount++;
+              if (i === index) {
+                visualLineIndex = originalLineCount;
+              }
+            } else {
+              // For fixed side, need to account for the mapping
+              visualLineIndex = originalLineCount + 1;
+              originalLineCount++;
+            }
+          }
+        }
+        
+        // Find line key that matches this visual line
         for (const [key, snippetContent] of Object.entries(codeSnippets)) {
           const keyLineNum = parseInt(key.match(/^(\d+)/)?.[1] || '0');
           const isNewLine = /[a-z]$/.test(key);
           
-          // For original lines, match by line number
-          if (isOriginal && !isNewLine && keyLineNum === actualLineNumber) {
+          if (isOriginal && !isNewLine && keyLineNum === visualLineIndex) {
             lineKey = key;
             break;
-          }
-          // For fixed lines, it's more complex due to line shifts
-          else if (!isOriginal) {
-            // This would need more sophisticated mapping
-            // For now, use similar logic but account for insertions
-            if (keyLineNum === actualLineNumber) {
+          } else if (!isOriginal) {
+            // For fixed side, try to match by line content or line number
+            if (keyLineNum === visualLineIndex || (isNewLine && keyLineNum === Math.floor(visualLineIndex))) {
               lineKey = key;
               break;
             }
