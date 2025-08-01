@@ -373,14 +373,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const alignedOriginal: (string | null)[] = [];
     const alignedFixed: (string | null)[] = [];
 
-    let originalIndex = 0;
-    let fixedIndex = 0;
-
-    // Process each line based on the highlight data
-    const changedLinesSet = new Set(highlightData.changed_lines || []);
-    const addedLinesSet = new Set(highlightData.added_lines || []);
-    const removedLinesSet = new Set(highlightData.removed_lines || []);
-
     // Create a mapping of original line numbers to their changes
     const lineChanges = new Map();
     Object.keys(codeSnippets).forEach(lineKey => {
@@ -392,52 +384,91 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       lineChanges.get(lineNum).push({ lineKey, changeType });
     });
 
-    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
-      const currentOriginalLine = originalIndex + 1;
+    // Sort line numbers for sequential processing
+    const sortedLineNumbers = Array.from(new Set([
+      ...Array.from({ length: originalLines.length }, (_, i) => i + 1),
+      ...Object.keys(codeSnippets).map(key => parseInt(key.match(/^(\d+)/)?.[1] || '0'))
+    ])).sort((a, b) => a - b);
+
+    let originalIndex = 0;
+    let fixedIndex = 0;
+
+    for (const lineNum of sortedLineNumbers) {
+      const hasChanges = lineChanges.has(lineNum);
+      const changes = hasChanges ? lineChanges.get(lineNum) : [];
       
-      if (lineChanges.has(currentOriginalLine)) {
-        const changes = lineChanges.get(currentOriginalLine);
-        
-        // Handle original line
-        if (originalIndex < originalLines.length) {
-          alignedOriginal.push(originalLines[originalIndex]);
-          originalIndex++;
-        } else {
-          alignedOriginal.push(null);
-        }
+      // Advance to current line in original
+      while (originalIndex < lineNum - 1 && originalIndex < originalLines.length) {
+        alignedOriginal.push(originalLines[originalIndex]);
+        alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
+        originalIndex++;
+        fixedIndex++;
+      }
 
-        // Handle fixed line(s) - may have multiple lines for additions
-        let addedCount = 0;
-        for (const change of changes) {
-          if (change.changeType.type === 'added') {
-            addedCount++;
+      if (hasChanges) {
+        // Process changes for this line
+        const deletedChanges = changes.filter(c => c.changeType.type === 'deleted');
+        const modifiedChanges = changes.filter(c => c.changeType.type === 'modified');
+        const addedChanges = changes.filter(c => c.changeType.type === 'added');
+
+        if (deletedChanges.length > 0) {
+          // Deleted line: show in original, null in fixed
+          if (originalIndex < originalLines.length) {
+            alignedOriginal.push(originalLines[originalIndex]);
+            alignedFixed.push(null);
+            originalIndex++;
           }
-        }
-
-        if (fixedIndex < fixedLines.length) {
-          alignedFixed.push(fixedLines[fixedIndex]);
-          fixedIndex++;
+        } else if (modifiedChanges.length > 0) {
+          // Modified line: show both versions
+          if (originalIndex < originalLines.length) {
+            alignedOriginal.push(originalLines[originalIndex]);
+            originalIndex++;
+          } else {
+            alignedOriginal.push(null);
+          }
           
-          // Add any additional lines for insertions
-          for (let i = 0; i < addedCount; i++) {
-            if (fixedIndex < fixedLines.length) {
-              alignedOriginal.push(null); // Empty space in original
-              alignedFixed.push(fixedLines[fixedIndex]);
-              fixedIndex++;
-            }
+          if (fixedIndex < fixedLines.length) {
+            alignedFixed.push(fixedLines[fixedIndex]);
+            fixedIndex++;
+          } else {
+            alignedFixed.push(null);
           }
         } else {
-          alignedFixed.push(null);
+          // Normal line (might have additions after it)
+          if (originalIndex < originalLines.length) {
+            alignedOriginal.push(originalLines[originalIndex]);
+            originalIndex++;
+          } else {
+            alignedOriginal.push(null);
+          }
+          
+          if (fixedIndex < fixedLines.length) {
+            alignedFixed.push(fixedLines[fixedIndex]);
+            fixedIndex++;
+          } else {
+            alignedFixed.push(null);
+          }
+        }
+
+        // Handle added lines (show null in original, content in fixed)
+        for (const addedChange of addedChanges) {
+          alignedOriginal.push(null);
+          if (fixedIndex < fixedLines.length) {
+            alignedFixed.push(fixedLines[fixedIndex]);
+            fixedIndex++;
+          } else {
+            alignedFixed.push(null);
+          }
         }
       } else {
-        // No changes for this line, copy as-is
+        // No changes, advance both
         if (originalIndex < originalLines.length) {
           alignedOriginal.push(originalLines[originalIndex]);
           originalIndex++;
         } else {
           alignedOriginal.push(null);
         }
-
+        
         if (fixedIndex < fixedLines.length) {
           alignedFixed.push(fixedLines[fixedIndex]);
           fixedIndex++;
@@ -445,6 +476,14 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           alignedFixed.push(null);
         }
       }
+    }
+
+    // Handle any remaining lines
+    while (originalIndex < originalLines.length || fixedIndex < fixedLines.length) {
+      alignedOriginal.push(originalIndex < originalLines.length ? originalLines[originalIndex] : null);
+      alignedFixed.push(fixedIndex < fixedLines.length ? fixedLines[fixedIndex] : null);
+      originalIndex++;
+      fixedIndex++;
     }
 
     return {
@@ -509,28 +548,36 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       // Apply styling based on line type
       if (line === null) {
-        className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
-        line = isOriginal ? '(line removed)' : '(line added)';
+        if (isOriginal) {
+          // Empty space in original for added lines
+          className = 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600';
+          line = '';
+        } else {
+          // Empty space in fixed for deleted lines - use red background
+          className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500 text-gray-400';
+          line = '(line deleted)';
+        }
       } else {
-        const isDeletedLine = isOriginal && hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'deleted');
-        
-        const isAddedLine = !isOriginal && hasActualChanges &&
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'added');
-          
-        const isModifiedLine = hasActualChanges && 
-          relatedLineKeys.some(key => getLineChangeType(key, originalCode.split('\n')).type === 'modified');
+        // Find change types for this line
+        const changeTypes = relatedLineKeys.map(key => getLineChangeType(key, originalCode.split('\n')));
+        const isDeletedLine = changeTypes.some(ct => ct.type === 'deleted');
+        const isAddedLine = changeTypes.some(ct => ct.type === 'added');
+        const isModifiedLine = changeTypes.some(ct => ct.type === 'modified');
 
-        if (isAddedLine) {
-          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
-        } else if (isDeletedLine) {
+        if (isDeletedLine) {
+          // Deleted lines: red on both sides
           className = 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500';
+        } else if (isAddedLine && !isOriginal) {
+          // New lines: green on fixed side only
+          className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
         } else if (isModifiedLine) {
+          // Modified lines: red on original, yellow on fixed
           className = isOriginal 
             ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
             : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
         }
 
+        // Show inline controls only on fixed side for lines with actual changes
         showButtons = hasActualChanges && !!primaryFix && !isOriginal;
       }
       
