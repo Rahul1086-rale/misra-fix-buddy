@@ -635,13 +635,23 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     // Get original line content
     const originalContent = originalLines[lineNumber - 1] || '';
     
+    // Debug logging
+    console.log(`Line ${lineKey}:`, {
+      originalContent: `"${originalContent}"`,
+      snippetContent: `"${snippetContent}"`,
+      originalTrimmed: `"${originalContent.trim()}"`,
+      snippetEmpty: snippetContent === "" || snippetContent === null || snippetContent === undefined
+    });
+    
     // Handle deleted lines - check if snippet is empty AND original line was not empty
     if (snippetContent === "" || snippetContent === null || snippetContent === undefined) {
       // Only consider it deleted if the original line had content
       if (originalContent.trim() !== "") {
+        console.log(`Line ${lineKey} marked as DELETED`);
         return { type: 'deleted', originalContent, fixedContent: '' };
       } else {
         // Both original and snippet are empty - no actual change
+        console.log(`Line ${lineKey} marked as UNCHANGED (both empty)`);
         return { type: 'unchanged', originalContent, fixedContent: snippetContent || '' };
       }
     }
@@ -650,11 +660,19 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const cleanOriginal = originalContent.replace(/^\d+\s*/, '').trim();
     const cleanFixed = (snippetContent || '').replace(/^\d+\s*/, '').trim();
     
+    console.log(`Line ${lineKey} content comparison:`, {
+      cleanOriginal: `"${cleanOriginal}"`,
+      cleanFixed: `"${cleanFixed}"`,
+      areEqual: cleanOriginal === cleanFixed
+    });
+    
     // Compare actual content
     if (cleanOriginal !== cleanFixed) {
+      console.log(`Line ${lineKey} marked as MODIFIED`);
       return { type: 'modified', originalContent, fixedContent: snippetContent };
     }
     
+    console.log(`Line ${lineKey} marked as UNCHANGED`);
     return { type: 'unchanged', originalContent, fixedContent: snippetContent };
   };
 
