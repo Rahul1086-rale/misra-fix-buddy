@@ -41,6 +41,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const [isLoading, setIsLoading] = useState(false);
   const [highlightData, setHighlightData] = useState<any>(null);
   const [codeSnippets, setCodeSnippets] = useState<any>({});
+  const [violationMapping, setViolationMapping] = useState<Record<string, { rule: string; changed_lines: string[] }>>({});
   
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const fixedScrollRef = useRef<HTMLDivElement>(null);
@@ -62,11 +63,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     setIsLoading(true);
     try {
-      // Load review state, diff data, and code snippets in parallel
-      const [reviewResponse, diffResponse, snippetsResponse] = await Promise.all([
+      // Load review state, diff data, code snippets, and violation mapping in parallel
+      const [reviewResponse, diffResponse, snippetsResponse, violationResponse] = await Promise.all([
         apiClient.getReviewState(state.projectId),
         apiClient.getDiff(state.projectId),
-        apiClient.getCodeSnippets(state.projectId)
+        apiClient.getCodeSnippets(state.projectId),
+        apiClient.getViolationMapping(state.projectId)
       ]);
 
       if (reviewResponse.success && reviewResponse.data) {
@@ -83,6 +85,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       if (snippetsResponse.success && snippetsResponse.data) {
         setCodeSnippets(snippetsResponse.data);
+      }
+
+      if (violationResponse.success && violationResponse.data) {
+        setViolationMapping(violationResponse.data);
       }
     } catch (error) {
       console.error('Failed to load review data:', error);
@@ -418,22 +424,88 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }, 10);
   };
 
-  // Group consecutive line changes for better UX
-  const getLineGroups = () => {
+  // Group lines by violation-based mapping for better UX
+  const getViolationGroups = () => {
     const groups: { [key: string]: string[] } = {};
     
-    Object.keys(codeSnippets).forEach(lineKey => {
-      const baseLineMatch = lineKey.match(/^(\d+)/);
-      if (baseLineMatch) {
-        const baseLine = baseLineMatch[1];
-        if (!groups[baseLine]) {
-          groups[baseLine] = [];
+    // Create violation-based groups
+    Object.entries(violationMapping).forEach(([violationLine, mapping]) => {
+      const changedLines = mapping.changed_lines || [];
+      
+      // Group all changed lines for this violation together
+      changedLines.forEach(lineKey => {
+        // Use violation line as the group key for consistency
+        if (!groups[violationLine]) {
+          groups[violationLine] = [];
         }
-        groups[baseLine].push(lineKey);
+        // Only add if this line exists in codeSnippets
+        if (codeSnippets[lineKey]) {
+          groups[violationLine].push(lineKey);
+        }
+      });
+    });
+    
+    // Handle lines that don't have violation mapping (fallback to single line groups)
+    Object.keys(codeSnippets).forEach(lineKey => {
+      const isInViolationGroup = Object.values(groups).some(group => group.includes(lineKey));
+      if (!isInViolationGroup) {
+        const baseLineMatch = lineKey.match(/^(\d+)/);
+        if (baseLineMatch) {
+          const baseLine = baseLineMatch[1];
+          if (!groups[baseLine]) {
+            groups[baseLine] = [];
+          }
+          groups[baseLine].push(lineKey);
+        }
       }
     });
     
     return groups;
+  };
+
+  // Get violation group for a specific line
+  const getViolationGroupForLine = (lineKey: string): string[] => {
+    const groups = getViolationGroups();
+    
+    // Find which group this line belongs to
+    for (const [groupKey, lineKeys] of Object.entries(groups)) {
+      if (lineKeys.includes(lineKey)) {
+        return lineKeys;
+      }
+    }
+    
+    // Fallback to single line
+    return [lineKey];
+  };
+
+  // Handle conflicts when multiple violations affect the same line
+  const resolveLineConflicts = (lineKey: string): 'accepted' | 'rejected' | 'pending' => {
+    // Get all violations that affect this line
+    const affectingViolations = Object.entries(violationMapping).filter(([, mapping]) => 
+      mapping.changed_lines.includes(lineKey)
+    );
+    
+    if (affectingViolations.length <= 1) {
+      // No conflict, return the fix status
+      const fix = fixes.find(f => f.line_key === lineKey);
+      return fix?.status || 'pending';
+    }
+    
+    // Multiple violations affect this line - prioritize accepted over rejected
+    const statuses = affectingViolations.map(([violationLine]) => {
+      const violationFixes = violationMapping[violationLine]?.changed_lines
+        ?.map(lk => fixes.find(f => f.line_key === lk)?.status)
+        .filter(Boolean) || [];
+      
+      if (violationFixes.includes('accepted')) return 'accepted';
+      if (violationFixes.includes('rejected')) return 'rejected';
+      return 'pending';
+    });
+    
+    // Priority: accepted > rejected > pending
+    if (statuses.includes('accepted')) return 'accepted';
+    if (statuses.includes('rejected')) return 'rejected';
+    return 'pending';
   };
 
   // Fixed diff highlighting with proper deleted line support
@@ -443,7 +515,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const codeLines = code.split('\n');
     const changedLines = new Set<number>();
     const addedLines = new Set<number>();
-    const lineGroups = getLineGroups();
+    const lineGroups = getViolationGroups();
     
     if (isOriginal) {
       highlightData.changed_lines?.forEach((lineNum: number) => {
@@ -463,8 +535,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const actualLineNumber = index + 1;
       const lineKey = actualLineNumber.toString();
       
-      // Find all related line keys for this line (including suffixes like 93a, 93b)
-      const relatedLineKeys = lineGroups[lineKey] || [];
+      // Find all related line keys for this line using violation-based grouping
+      const relatedLineKeys = getViolationGroupForLine(lineKey);
       const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
       const primaryFix = allRelatedFixes[0];
       

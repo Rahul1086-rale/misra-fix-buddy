@@ -681,6 +681,21 @@ async def get_code_snippets(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/violation-mapping/{project_id}")
+async def get_violation_mapping(project_id: str):
+    """Get violation mapping for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        violation_mapping = session.get('violation_mapping', {})
+        
+        return violation_mapping
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/review/reset/{project_id}")
 async def reset_review(project_id: str):
     """Reset all review decisions for a project"""

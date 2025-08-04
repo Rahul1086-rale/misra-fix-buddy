@@ -257,6 +257,15 @@ class ApiClient {
       body: JSON.stringify({ projectId }),
     });
   }
+
+  async getViolationMapping(projectId: string): Promise<ApiResponse<Record<string, {
+    rule: string;
+    changed_lines: string[];
+  }>>> {
+    return this.request(`/violation-mapping/${projectId}`, {
+      method: 'GET',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
