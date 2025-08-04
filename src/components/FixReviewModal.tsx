@@ -329,6 +329,76 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
+  const handleGroupReset = async (lineKeys: string[]) => {
+    if (!state.projectId || lineKeys.length === 0) return;
+    
+    try {
+      // Reset all lines in the group
+      const promises = lineKeys.map(lineKey => 
+        apiClient.reviewAction(state.projectId!, lineKey, 'reset')
+      );
+      
+      const responses = await Promise.all(promises);
+      const allSuccessful = responses.every(response => response.success);
+      
+      if (allSuccessful) {
+        // Update local state for all lines to pending
+        const updatedFixes = fixes.map(fix => 
+          lineKeys.includes(fix.line_key)
+            ? { ...fix, status: 'pending' as const }
+            : fix
+        );
+        setFixes(updatedFixes);
+        
+        // Update summary
+        if (summary) {
+          const newSummary = { ...summary };
+          
+          // Count changes by previous status
+          let acceptedToReset = 0;
+          let rejectedToReset = 0;
+          
+          lineKeys.forEach(lineKey => {
+            const currentFix = fixes.find(fix => fix.line_key === lineKey);
+            if (currentFix?.status === 'accepted') {
+              acceptedToReset += 1;
+            } else if (currentFix?.status === 'rejected') {
+              rejectedToReset += 1;
+            }
+          });
+          
+          // Adjust counts
+          newSummary.accepted_count -= acceptedToReset;
+          newSummary.rejected_count -= rejectedToReset;
+          newSummary.pending_count += (acceptedToReset + rejectedToReset);
+          
+          setSummary(newSummary);
+        }
+        
+        toast({
+          title: "Success",
+          description: `Group reset to pending (${lineKeys.length} line${lineKeys.length > 1 ? 's' : ''})`,
+        });
+        
+        // Reload diff to show updated changes
+        const diffResponse = await apiClient.getDiff(state.projectId);
+        if (diffResponse.success && diffResponse.data) {
+          setOriginalCode(diffResponse.data.original);
+          setFixedCode(diffResponse.data.fixed);
+          setHighlightData(diffResponse.data.highlight);
+        }
+      } else {
+        throw new Error('Some resets failed');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reset group",
+        variant: "destructive",
+      });
+    }
+  };
+
   const navigateToFix = async (index: number) => {
     if (index >= 0 && index < fixes.length && state.projectId) {
       setCurrentFixIndex(index);
@@ -604,10 +674,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        // Reset all lines in the group
-                        relatedLineKeys.forEach(key => handleSingleLineReset(key));
-                      }}
+                      onClick={() => handleGroupReset(relatedLineKeys)}
                       className="h-6 px-2 text-xs"
                     >
                       <RotateCcw className="w-3 h-3" />
