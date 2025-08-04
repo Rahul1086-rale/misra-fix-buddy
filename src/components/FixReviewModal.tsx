@@ -480,6 +480,22 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return [lineKey]; // Fallback to single line
   };
 
+  // Get the primary line (first line) of a violation group
+  const getGroupPrimaryLine = (lineKeys: string[]): string => {
+    return lineKeys.sort((a, b) => {
+      const aNum = parseInt(a.match(/^(\d+)/)?.[1] || '0');
+      const bNum = parseInt(b.match(/^(\d+)/)?.[1] || '0');
+      return aNum - bNum || a.localeCompare(b);
+    })[0];
+  };
+
+  // Check if this line should show the group action buttons
+  const shouldShowGroupButtons = (lineKey: string): boolean => {
+    const violationGroup = getViolationGroupForLine(lineKey);
+    const primaryLine = getGroupPrimaryLine(violationGroup);
+    return lineKey === primaryLine;
+  };
+
   // Resolve conflicts when same line is in multiple violations
   const resolveLineConflicts = (lineKey: string): 'accepted' | 'rejected' | 'pending' => {
     const fix = fixes.find(f => f.line_key === lineKey);
@@ -489,14 +505,13 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     return fix.status;
   };
 
-  // Fixed diff highlighting with proper deleted line support
+  // Fixed diff highlighting with proper deleted line support and grouped buttons
   const highlightDifferencesWithActions = (code: string, isOriginal: boolean) => {
     if (!originalCode || !fixedCode || !highlightData) return code;
     
     const codeLines = code.split('\n');
     const changedLines = new Set<number>();
     const addedLines = new Set<number>();
-    const violationGroups = getViolationGroups();
     
     if (isOriginal) {
       highlightData.changed_lines?.forEach((lineNum: number) => {
@@ -542,19 +557,24 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
       }
       
-      // Show buttons only on the fixed side for all changes (including deleted lines)
-      const showButtons = !isOriginal && hasActualChanges;
+      // Only show buttons on the fixed side for primary line of each group
+      const showButtons = !isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       // Show placeholder space on original side to maintain alignment
-      const showPlaceholder = isOriginal && hasActualChanges;
+      const showPlaceholder = isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       
       return (
         <div key={index} className={`${className} px-2 py-0.5 group relative`}>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between min-h-[20px]">
             <span className="flex-1 font-mono text-xs break-all">
               {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
             </span>
             {showButtons && primaryFix && (
               <div className="flex gap-1 ml-2 shrink-0">
+                {relatedLineKeys.length > 1 && (
+                  <span className="text-xs text-muted-foreground px-1 bg-muted rounded mr-1">
+                    {relatedLineKeys.length} lines
+                  </span>
+                )}
                 {primaryFix.status === 'pending' ? (
                   <>
                      <Button
@@ -584,7 +604,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleSingleLineReset(primaryFix.line_key)}
+                      onClick={() => {
+                        // Reset all lines in the group
+                        relatedLineKeys.forEach(key => handleSingleLineReset(key));
+                      }}
                       className="h-6 px-2 text-xs"
                     >
                       <RotateCcw className="w-3 h-3" />
@@ -594,8 +617,15 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               </div>
             )}
             {showPlaceholder && (
-              <div className="flex gap-1 ml-2 shrink-0 w-20 h-6">
-                {/* Placeholder space to maintain alignment with fixed side */}
+              <div className="flex gap-1 ml-2 shrink-0">
+                {relatedLineKeys.length > 1 && (
+                  <span className="text-xs text-muted-foreground px-1 bg-muted rounded mr-1 opacity-50">
+                    {relatedLineKeys.length} lines
+                  </span>
+                )}
+                <div className="w-16 h-6">
+                  {/* Placeholder space to maintain alignment with fixed side */}
+                </div>
               </div>
             )}
           </div>
