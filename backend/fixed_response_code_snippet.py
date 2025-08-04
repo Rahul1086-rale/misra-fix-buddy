@@ -2,6 +2,24 @@
 import re
 import json
 
+
+def extract_violation_mapping(response_text: str) -> dict:
+    """Extract Violation_Mapping_list dictionary from response string."""
+    start_key = "Violation_Mapping_list ="
+    if start_key not in response_text:
+        raise ValueError("Violation_Mapping_list not found in response.")
+
+    # Extract JSON portion of the dictionary
+    json_part = response_text.split(start_key, 1)[1].strip()
+    
+    try:
+        # Load it safely using `eval` with dictionary only context
+        violation_mapping = eval(json_part, {"__builtins__": None}, {})
+        return violation_mapping
+    except Exception as e:
+        raise ValueError("Failed to parse Violation_Mapping_list") from e
+
+
 def extract_snippets_from_response(response_text):
     """
     Parses Gemini-style C++ response text and extracts line-numbered code,

@@ -105,6 +105,18 @@ def send_misra_violations(chat: ChatSession, violations_text: str) -> str:
             1.  **Identify the specific code location** for each violation in the `CURRENT MISRA Violations to Fix` list within the C++ file you previously received.
             2.  **Apply the necessary MISRA C++ compliant fix** to that code.
             3.  **Provide ONLY the fixed C++ code snippet** for each violation. This snippet should be a small, relevant section of the code including the fix and enough surrounding context to clearly identify its position.
+            4. After the snippet, provide a JSON mapping like: 
+            Violation_Mapping_list =
+            {
+                "52": {
+                    "rule": "Rule_10_1",
+                    "changed_lines": ["52", "52a", "52b"]
+                },
+                "104": {
+                    "rule": "Rule_8_4",
+                    "changed_lines": ["104"]
+                }
+            }
 
             **Important Note on Previous Fixes:**
             If a violation listed below is related to an issue you have previously fixed (e.g., a change to a macro definition that impacts multiple usage sites), and your analysis indicates that the *same type of fix* is still applicable for this new reported instance, please **re-provide the appropriate fixed code snippet** for this specific line. Do not state that it is "already addressed"; instead, act as if it's a new instance requiring the same solution.
