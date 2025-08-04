@@ -47,3 +47,9 @@ def extract_snippets_from_response(response_text):
 def save_snippets_to_json(snippets, filepath="temp_snippets.json"):
     with open(filepath, "w") as f:
         json.dump(snippets, f, indent=2)
+
+
+def save_violation_mapping_to_json(violation_mapping, filepath="temp_violation_mapping.json"):
+    """Save violation mapping dictionary to JSON file."""
+    with open(filepath, "w") as f:
+        json.dump(violation_mapping, f, indent=2)

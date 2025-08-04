@@ -16,7 +16,7 @@ from excel_utils import extract_violations_for_file
 from numbering import add_line_numbers
 from denumbering import remove_line_numbers
 from replace import merge_fixed_snippets_into_file
-from fixed_response_code_snippet import extract_snippets_from_response, save_snippets_to_json
+from fixed_response_code_snippet import extract_snippets_from_response, save_snippets_to_json, extract_violation_mapping, save_violation_mapping_to_json
 from diff_utils import create_temp_fixed_denumbered_file, get_file_content, create_diff_data, cleanup_temp_files
 from review_manager import ReviewManager
 
@@ -341,14 +341,28 @@ async def gemini_fix_violations(request: FixViolationsRequest):
         code_snippets = extract_snippets_from_response(response)
         print(f"Extracted {len(code_snippets)} snippets")  # Debug
         
+        # Extract violation mapping
+        violation_mapping = {}
+        try:
+            print("Extracting violation mapping...")  # Debug
+            violation_mapping = extract_violation_mapping(response)
+            print(f"Extracted violation mapping for {len(violation_mapping)} violations")  # Debug
+        except Exception as e:
+            print(f"Warning: Could not extract violation mapping: {str(e)}")  # Debug
+        
         # Save snippets to session
         if project_id in sessions:
             print("Saving snippets to session...")  # Debug
             sessions[project_id]['fixed_snippets'] = code_snippets
+            sessions[project_id]['violation_mapping'] = violation_mapping
             snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
+            violation_mapping_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_violation_mapping.json")
             save_snippets_to_json(code_snippets, snippet_file)
+            save_violation_mapping_to_json(violation_mapping, violation_mapping_file)
             sessions[project_id]['snippet_file'] = snippet_file
+            sessions[project_id]['violation_mapping_file'] = violation_mapping_file
             print(f"Snippets saved to: {snippet_file}")  # Debug
+            print(f"Violation mapping saved to: {violation_mapping_file}")  # Debug
             
             # Create temporary fixed files for immediate diff view
             try:
@@ -677,6 +691,21 @@ async def get_code_snippets(project_id: str):
         fixed_snippets = session.get('fixed_snippets', {})
         
         return fixed_snippets
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/violation-mapping/{project_id}")
+async def get_violation_mapping(project_id: str):
+    """Get violation mapping for a project"""
+    try:
+        if project_id not in sessions:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        session = sessions[project_id]
+        violation_mapping = session.get('violation_mapping', {})
+        
+        return violation_mapping
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

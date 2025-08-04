@@ -41,6 +41,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
   const [isLoading, setIsLoading] = useState(false);
   const [highlightData, setHighlightData] = useState<any>(null);
   const [codeSnippets, setCodeSnippets] = useState<any>({});
+  const [violationMapping, setViolationMapping] = useState<any>({});
   
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const fixedScrollRef = useRef<HTMLDivElement>(null);
@@ -62,11 +63,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     
     setIsLoading(true);
     try {
-      // Load review state, diff data, and code snippets in parallel
-      const [reviewResponse, diffResponse, snippetsResponse] = await Promise.all([
+      // Load review state, diff data, code snippets, and violation mapping in parallel
+      const [reviewResponse, diffResponse, snippetsResponse, violationMappingResponse] = await Promise.all([
         apiClient.getReviewState(state.projectId),
         apiClient.getDiff(state.projectId),
-        apiClient.getCodeSnippets(state.projectId)
+        apiClient.getCodeSnippets(state.projectId),
+        apiClient.getViolationMapping(state.projectId)
       ]);
 
       if (reviewResponse.success && reviewResponse.data) {
@@ -83,6 +85,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
       if (snippetsResponse.success && snippetsResponse.data) {
         setCodeSnippets(snippetsResponse.data);
+      }
+
+      if (violationMappingResponse.success && violationMappingResponse.data) {
+        setViolationMapping(violationMappingResponse.data);
       }
     } catch (error) {
       console.error('Failed to load review data:', error);
@@ -180,11 +186,22 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  const handleGroupReviewAction = async (lineKeys: string[], action: 'accept' | 'reject') => {
+  const handleViolationGroupAction = async (lineKeys: string[], action: 'accept' | 'reject') => {
     if (!state.projectId || lineKeys.length === 0) return;
     
     try {
-      // Process all line keys in the group
+      // For conflicts resolution: collect all lines that are affected
+      const allAffectedLines = new Set<string>();
+      
+      // Find all violation groups that contain any of the target lines
+      const groups = getViolationGroups();
+      Object.values(groups).forEach(group => {
+        if (group.some(lineKey => lineKeys.includes(lineKey))) {
+          group.forEach(lineKey => allAffectedLines.add(lineKey));
+        }
+      });
+      
+      // Process only the lines in this specific violation group
       const promises = lineKeys.map(lineKey => 
         apiClient.reviewAction(state.projectId!, lineKey, action)
       );
@@ -193,12 +210,15 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const allSuccessful = responses.every(response => response.success);
       
       if (allSuccessful) {
-        // Update local state for all lines in the group
-        const updatedFixes = fixes.map(fix => 
-          lineKeys.includes(fix.line_key)
-            ? { ...fix, status: action === 'accept' ? 'accepted' as const : 'rejected' as const }
-            : fix
-        );
+        // Update local state with conflict resolution
+        const updatedFixes = fixes.map(fix => {
+          if (lineKeys.includes(fix.line_key)) {
+            // This line is being explicitly changed
+            return { ...fix, status: action === 'accept' ? 'accepted' as const : 'rejected' as const };
+          }
+          // For other lines, no changes needed as conflict resolution is handled by backend
+          return fix;
+        });
         setFixes(updatedFixes);
         
         // Update summary
@@ -237,7 +257,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         toast({
           title: "Success",
-          description: `${lineKeys.length} fix(es) ${action}ed successfully`,
+          description: `Violation fix ${action}ed successfully (${lineKeys.length} line${lineKeys.length > 1 ? 's' : ''})`,
         });
         
         // Reload diff to show updated changes
@@ -251,7 +271,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     } catch (error) {
       toast({
         title: "Error",
-        description: `Failed to ${action} fixes`,
+        description: `Failed to ${action} violation fix`,
         variant: "destructive",
       });
     }
@@ -418,22 +438,55 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }, 10);
   };
 
-  // Group consecutive line changes for better UX
-  const getLineGroups = () => {
+  // Get violation groups based on violation mapping
+  const getViolationGroups = () => {
     const groups: { [key: string]: string[] } = {};
     
+    // Create groups based on violation mapping
+    Object.keys(violationMapping).forEach(violationLine => {
+      const mapping = violationMapping[violationLine];
+      if (mapping && mapping.changed_lines) {
+        // Use violation line as group key
+        groups[violationLine] = mapping.changed_lines.filter((lineKey: string) => 
+          lineKey in codeSnippets
+        );
+      }
+    });
+    
+    // Handle orphaned lines (lines not in any violation mapping)
     Object.keys(codeSnippets).forEach(lineKey => {
-      const baseLineMatch = lineKey.match(/^(\d+)/);
-      if (baseLineMatch) {
-        const baseLine = baseLineMatch[1];
-        if (!groups[baseLine]) {
-          groups[baseLine] = [];
+      const isInAnyGroup = Object.values(groups).some(group => group.includes(lineKey));
+      if (!isInAnyGroup) {
+        // Create individual group for orphaned lines
+        const baseLineMatch = lineKey.match(/^(\d+)/);
+        if (baseLineMatch) {
+          const baseLine = baseLineMatch[1];
+          groups[`orphan_${baseLine}`] = [lineKey];
         }
-        groups[baseLine].push(lineKey);
       }
     });
     
     return groups;
+  };
+
+  // Find the violation group for a specific line
+  const getViolationGroupForLine = (lineKey: string): string[] => {
+    const groups = getViolationGroups();
+    for (const groupKey in groups) {
+      if (groups[groupKey].includes(lineKey)) {
+        return groups[groupKey];
+      }
+    }
+    return [lineKey]; // Fallback to single line
+  };
+
+  // Resolve conflicts when same line is in multiple violations
+  const resolveLineConflicts = (lineKey: string): 'accepted' | 'rejected' | 'pending' => {
+    const fix = fixes.find(f => f.line_key === lineKey);
+    if (!fix) return 'pending';
+    
+    // Priority: accepted > rejected > pending
+    return fix.status;
   };
 
   // Fixed diff highlighting with proper deleted line support
@@ -443,7 +496,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const codeLines = code.split('\n');
     const changedLines = new Set<number>();
     const addedLines = new Set<number>();
-    const lineGroups = getLineGroups();
+    const violationGroups = getViolationGroups();
     
     if (isOriginal) {
       highlightData.changed_lines?.forEach((lineNum: number) => {
@@ -463,8 +516,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const actualLineNumber = index + 1;
       const lineKey = actualLineNumber.toString();
       
-      // Find all related line keys for this line (including suffixes like 93a, 93b)
-      const relatedLineKeys = lineGroups[lineKey] || [];
+      // Find the violation group for this line
+      const relatedLineKeys = getViolationGroupForLine(lineKey);
       const allRelatedFixes = relatedLineKeys.map(key => fixes.find(f => f.line_key === key)).filter(Boolean);
       const primaryFix = allRelatedFixes[0];
       
@@ -504,21 +557,21 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               <div className="flex gap-1 ml-2 shrink-0">
                 {primaryFix.status === 'pending' ? (
                   <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'reject')}
-                      className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
-                    >
-                      <XIcon className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => handleGroupReviewAction(relatedLineKeys, 'accept')}
-                      className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
-                    >
-                      <Check className="w-3 h-3" />
-                    </Button>
+                     <Button
+                       variant="outline"
+                       size="sm"
+                       onClick={() => handleViolationGroupAction(relatedLineKeys, 'reject')}
+                       className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                     >
+                       <XIcon className="w-3 h-3" />
+                     </Button>
+                     <Button
+                       size="sm"
+                       onClick={() => handleViolationGroupAction(relatedLineKeys, 'accept')}
+                       className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
+                     >
+                       <Check className="w-3 h-3" />
+                     </Button>
                   </>
                 ) : (
                   <>
