@@ -497,7 +497,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       return (
         <div key={index} className={`${className} px-2 py-0.5 group relative`}>
           <div className="flex items-center justify-between">
-            <span className="flex-1 font-mono text-xs">
+            <span className="flex-1 font-mono text-xs break-all">
               {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
             </span>
             {showButtons && primaryFix && (
@@ -757,45 +757,45 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           if (changeInfo.type === 'unchanged') return null;
           
           return (
-            <div key={lineKey} className="border rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Line {lineKey}</span>
+            <div key={lineKey} className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-medium">Line {lineKey}</span>
                   <Badge variant={
                     changeInfo.type === 'added' ? 'default' :
                     changeInfo.type === 'deleted' ? 'destructive' : 'secondary'
-                  }>
+                  } className="text-xs">
                     {changeInfo.type.charAt(0).toUpperCase() + changeInfo.type.slice(1)}
                   </Badge>
                   {fix && (
                     <Badge variant={
                       fix.status === 'accepted' ? 'default' :
                       fix.status === 'rejected' ? 'destructive' : 'secondary'
-                    }>
+                    } className="text-xs">
                       {fix.status}
                     </Badge>
                   )}
                 </div>
                 
                 {fix && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-1 flex-wrap">
                     {fix.status === 'pending' ? (
                       <>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleReviewAction(lineKey, 'reject')}
-                          className="text-red-600 hover:text-red-700"
+                          className="text-red-600 hover:text-red-700 text-xs h-6 px-2"
                         >
-                          <XIcon className="w-4 h-4 mr-1" />
+                          <XIcon className="w-3 h-3 mr-1" />
                           Reject
                         </Button>
                         <Button
                           size="sm"
                           onClick={() => handleReviewAction(lineKey, 'accept')}
-                          className="bg-green-600 hover:bg-green-700"
+                          className="bg-green-600 hover:bg-green-700 text-xs h-6 px-2"
                         >
-                          <Check className="w-4 h-4 mr-1" />
+                          <Check className="w-3 h-3 mr-1" />
                           Accept
                         </Button>
                       </>
@@ -804,9 +804,9 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                         variant="outline"
                         size="sm"
                         onClick={() => handleSingleLineReset(lineKey)}
-                        className="text-gray-600 hover:text-gray-700"
+                        className="text-gray-600 hover:text-gray-700 text-xs h-6 px-2"
                       >
-                        <RotateCcw className="w-4 h-4 mr-1" />
+                        <RotateCcw className="w-3 h-3 mr-1" />
                         Reset
                       </Button>
                     )}
@@ -814,11 +814,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 )}
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {changeInfo.type !== 'added' && (
                   <div>
-                    <div className="text-sm font-medium text-red-600 mb-2">Original</div>
-                    <div className="bg-red-50 border border-red-200 p-3 rounded font-mono text-sm dark:bg-red-950/20 dark:border-red-800">
+                    <div className="text-xs font-medium text-red-600 mb-1">Original</div>
+                    <div className="bg-red-50 border border-red-200 p-2 rounded font-mono text-xs dark:bg-red-950/20 dark:border-red-800 break-all">
                       {changeInfo.type === 'deleted' ? (
                         <span className="text-red-600">- {changeInfo.originalContent}</span>
                       ) : (
@@ -830,8 +830,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 
                 {changeInfo.type !== 'deleted' && (
                   <div>
-                    <div className="text-sm font-medium text-green-600 mb-2">Fixed</div>
-                    <div className="bg-green-50 border border-green-200 p-3 rounded font-mono text-sm dark:bg-green-950/20 dark:border-green-800">
+                    <div className="text-xs font-medium text-green-600 mb-1">Fixed</div>
+                    <div className="bg-green-50 border border-green-200 p-2 rounded font-mono text-xs dark:bg-green-950/20 dark:border-green-800 break-all">
                       <span className="text-green-600">+ {changeInfo.fixedContent}</span>
                     </div>
                   </div>
@@ -839,8 +839,8 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 
                 {changeInfo.type === 'deleted' && (
                   <div>
-                    <div className="text-sm font-medium text-gray-600 mb-2">Result</div>
-                    <div className="bg-gray-50 border border-gray-200 p-3 rounded font-mono text-sm dark:bg-gray-950/20 dark:border-gray-800">
+                    <div className="text-xs font-medium text-gray-600 mb-1">Result</div>
+                    <div className="bg-gray-50 border border-gray-200 p-2 rounded font-mono text-xs dark:bg-gray-950/20 dark:border-gray-800">
                       <span className="text-gray-600">(line deleted)</span>
                     </div>
                   </div>
@@ -855,16 +855,17 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
   const renderCodeBlock = (code: string, title: string, isOriginal?: boolean) => (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-2 p-3 border-b bg-muted">
-        <Code2 className="w-4 h-4" />
-        <span className="font-medium text-sm">{title}</span>
+      <div className="flex items-center gap-2 p-2 border-b bg-muted">
+        <Code2 className="w-3 h-3" />
+        <span className="font-medium text-xs">{title}</span>
       </div>
       <div 
         ref={isOriginal ? originalScrollRef : fixedScrollRef}
-        className="overflow-auto h-[500px]"
+        className="overflow-auto flex-1 min-h-0"
         onScroll={(e) => handleScroll(e, !!isOriginal)}
+        style={{ height: 'calc(100% - 40px)' }}
       >
-        <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words leading-5">
+        <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
           <code className="block">
             {code ? (
               isOriginal !== undefined ? (
@@ -887,43 +888,44 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl max-h-[90vh] w-[95vw] p-3 sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Eye className="w-5 h-5" />
-              Code Fix Review
+      <DialogContent className="max-w-[95vw] max-h-[95vh] w-[95vw] h-[95vh] p-0 flex flex-col">
+        <DialogHeader className="p-3 pb-2 border-b flex-shrink-0">
+          <DialogTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Eye className="w-4 h-4" />
+              <span className="text-sm">Code Fix Review</span>
               {summary && (
-                <span className="text-sm text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   ({summary.accepted_count} accepted, {summary.rejected_count} rejected, {summary.pending_count} pending)
                 </span>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1 w-full sm:w-auto justify-end">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-2"
+                className="flex items-center gap-1 text-xs h-7"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3 h-3" />
                 Reset
               </Button>
             </div>
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex-1 flex flex-col min-h-0 p-3 space-y-3">
           {/* Navigation and Bulk Action Controls */}
-          <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted rounded-lg gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={navigateToPreviousChange}
                 disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) <= 0}
+                className="text-xs h-7"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3 h-3" />
                 Previous
               </Button>
               <Button
@@ -931,89 +933,136 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 size="sm"
                 onClick={navigateToNextChange}
                 disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) >= getActualChangedFixes().length - 1}
+                className="text-xs h-7"
               >
                 Next
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-3 h-3" />
               </Button>
               {currentFix && (
-                <span className="text-sm text-muted-foreground ml-2">
+                <span className="text-xs text-muted-foreground">
                   Change {getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) + 1} of {getActualChangedFixes().length}
                 </span>
               )}
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleRejectAll}
                 disabled={getActualChangedFixes().filter(f => f.status === 'pending').length === 0}
-                className="text-red-600 hover:text-red-700"
+                className="text-red-600 hover:text-red-700 text-xs h-7"
               >
-                <XIcon className="w-4 h-4 mr-1" />
+                <XIcon className="w-3 h-3 mr-1" />
                 Reject All
               </Button>
               <Button
                 size="sm"
                 onClick={handleAcceptAll}
                 disabled={getActualChangedFixes().filter(f => f.status === 'pending').length === 0}
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-green-600 hover:bg-green-700 text-xs h-7"
               >
-                <Check className="w-4 h-4 mr-1" />
+                <Check className="w-3 h-3 mr-1" />
                 Accept All
               </Button>
             </div>
           </div>
 
           {/* Code Diff View */}
-          <Tabs defaultValue="inline" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="inline">Inline Review</TabsTrigger>
-              <TabsTrigger value="diff">Diff View</TabsTrigger>
-              <TabsTrigger value="original">Original Code</TabsTrigger>
-              <TabsTrigger value="fixed">Fixed Code (Accepted Changes)</TabsTrigger>
-            </TabsList>
+          <div className="flex-1 min-h-0">
+            <Tabs defaultValue="inline" className="w-full h-full flex flex-col">
+              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 flex-shrink-0 h-8">
+                <TabsTrigger value="inline" className="text-xs">Inline Review</TabsTrigger>
+                <TabsTrigger value="diff" className="text-xs">Diff View</TabsTrigger>
+                <TabsTrigger value="original" className="text-xs">Original</TabsTrigger>
+                <TabsTrigger value="fixed" className="text-xs">Fixed</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="inline" className="mt-4">
-              <div className="h-[500px] overflow-auto">
-                {renderInlineDiffView()}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="diff" className="mt-4">
-              <div className="grid grid-cols-2 gap-0 h-[500px] border rounded-lg">
-                {renderCodeBlock(originalCode, "Original Code", true)}
-                <div className="border-l">
-                  {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)", false)}
+              <TabsContent value="inline" className="flex-1 mt-2 min-h-0">
+                <div className="h-[calc(100vh-280px)] overflow-auto border rounded-lg">
+                  <div className="p-3">
+                    {renderInlineDiffView()}
+                  </div>
                 </div>
-              </div>
-            </TabsContent>
+              </TabsContent>
 
-            <TabsContent value="original" className="mt-4">
-              <div className="h-[500px] border rounded-lg overflow-hidden">
-                {renderCodeBlock(originalCode, "Original Code")}
-              </div>
-            </TabsContent>
+              <TabsContent value="diff" className="flex-1 mt-2 min-h-0">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center gap-2 p-2 border-b bg-muted">
+                      <Code2 className="w-3 h-3" />
+                      <span className="font-medium text-xs">Original Code</span>
+                    </div>
+                    <div 
+                      ref={originalScrollRef}
+                      className="overflow-auto h-[calc(100vh-320px)]"
+                      onScroll={(e) => handleScroll(e, true)}
+                    >
+                      <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
+                        <code className="block">
+                          {originalCode ? (
+                            <div className="space-y-0">
+                              {highlightDifferencesWithActions(originalCode, true)}
+                            </div>
+                          ) : (
+                            'Loading...'
+                          )}
+                        </code>
+                      </pre>
+                    </div>
+                  </div>
+                  <div className="border-t lg:border-t-0 lg:border-l h-full flex flex-col">
+                    <div className="flex items-center gap-2 p-2 border-b bg-muted">
+                      <Code2 className="w-3 h-3" />
+                      <span className="font-medium text-xs">Fixed Code (Accepted Changes Only)</span>
+                    </div>
+                    <div 
+                      ref={fixedScrollRef}
+                      className="overflow-auto h-[calc(100vh-320px)]"
+                      onScroll={(e) => handleScroll(e, false)}
+                    >
+                      <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
+                        <code className="block">
+                          {fixedCode ? (
+                            <div className="space-y-0">
+                              {highlightDifferencesWithActions(fixedCode, false)}
+                            </div>
+                          ) : (
+                            'Loading...'
+                          )}
+                        </code>
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
 
-            <TabsContent value="fixed" className="mt-4">
-              <div className="h-[500px] border rounded-lg overflow-hidden">
-                {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)")}
-              </div>
-            </TabsContent>
-          </Tabs>
+              <TabsContent value="original" className="flex-1 mt-2 min-h-0">
+                <div className="h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                  {renderCodeBlock(originalCode, "Original Code")}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="fixed" className="flex-1 mt-2 min-h-0">
+                <div className="h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                  {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)")}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center pt-4 border-t gap-3">
-            <Button variant="outline" onClick={onClose} className="order-2 sm:order-1">
+          <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center pt-3 border-t gap-2 flex-shrink-0">
+            <Button variant="outline" onClick={onClose} className="w-full sm:w-auto text-xs h-8">
               Close
             </Button>
             <Button 
               onClick={downloadAcceptedFixes}
               disabled={isLoading || (summary?.accepted_count === 0)}
-              className="order-1 sm:order-2"
+              className="w-full sm:w-auto text-xs h-8"
             >
-              <Download className="w-4 h-4 mr-2" />
-              {isLoading ? 'Processing...' : `Download File (${summary?.accepted_count || 0} fixes)`}
+              <Download className="w-3 h-3 mr-1" />
+              {isLoading ? 'Processing...' : `Download (${summary?.accepted_count || 0})`}
             </Button>
           </div>
         </div>
