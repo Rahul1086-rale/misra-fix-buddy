@@ -414,7 +414,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const lineNumber = parseInt(lineMatch[1]);
       // Scroll both panes to the approximate line
       if (originalScrollRef.current && fixedScrollRef.current) {
-        const scrollPosition = Math.max(0, (lineNumber - 5) * 20); // Approximate line height
+        const scrollPosition = Math.max(0, (lineNumber - 5) * 28); // Use fixed line height of 28px
         originalScrollRef.current.scrollTop = scrollPosition;
         fixedScrollRef.current.scrollTop = scrollPosition;
       }
@@ -633,68 +633,77 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const showPlaceholder = isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       
       return (
-        <div key={index} className={`${className} px-2 py-0.5 group relative`}>
-          <div className="flex items-center justify-between min-h-[20px]">
-            <span className="flex-1 font-mono text-xs break-all">
-              {isOriginal && isDeletedLine ? `${line} (deleted)` : line}
-            </span>
-            {showButtons && primaryFix && (
-              <div className="flex gap-1 ml-2 shrink-0">
-                {relatedLineKeys.length > 1 && (
-                  <span className="text-xs text-muted-foreground px-1 bg-muted rounded mr-1">
-                    {relatedLineKeys.length} lines
-                  </span>
-                )}
-                {primaryFix.status === 'pending' ? (
-                  <>
-                     <Button
-                       variant="outline"
-                       size="sm"
-                       onClick={() => handleViolationGroupAction(relatedLineKeys, 'reject')}
-                       className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
-                     >
-                       <XIcon className="w-3 h-3" />
-                     </Button>
-                     <Button
-                       size="sm"
-                       onClick={() => handleViolationGroupAction(relatedLineKeys, 'accept')}
-                       className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
-                     >
-                       <Check className="w-3 h-3" />
-                     </Button>
-                  </>
-                ) : (
-                  <>
-                    <Badge 
-                      variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
-                      className="text-xs h-6"
-                    >
-                      {primaryFix.status}
-                    </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGroupReset(relatedLineKeys)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                    </Button>
-                  </>
-                )}
-              </div>
-            )}
-            {showPlaceholder && (
-              <div className="flex gap-1 ml-2 shrink-0">
-                {relatedLineKeys.length > 1 && (
-                  <span className="text-xs text-muted-foreground px-1 bg-muted rounded mr-1 opacity-50">
-                    {relatedLineKeys.length} lines
-                  </span>
-                )}
-                <div className="w-16 h-6">
-                  {/* Placeholder space to maintain alignment with fixed side */}
-                </div>
-              </div>
-            )}
+        <div key={index} className={`${className} group relative`} style={{ minHeight: '28px', lineHeight: '28px' }}>
+          <div className="flex items-center min-h-[28px]">
+            {/* Line number - fixed width */}
+            <div className="w-12 flex-shrink-0 text-right pr-2 text-muted-foreground text-xs font-mono">
+              {actualLineNumber}
+            </div>
+            
+            {/* Code content - flexible width */}
+            <div className="flex-1 font-mono text-xs px-2 break-all" style={{ lineHeight: '28px' }}>
+              {isOriginal && isDeletedLine ? `${line || '\u00A0'} (deleted)` : (line || '\u00A0')}
+            </div>
+            
+            {/* Action buttons area - fixed width to maintain alignment */}
+            <div className="w-32 flex-shrink-0 flex justify-end items-center gap-1 pr-2">
+              {showButtons && primaryFix && (
+                <>
+                  {relatedLineKeys.length > 1 && (
+                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded">
+                      {relatedLineKeys.length}
+                    </span>
+                  )}
+                  {primaryFix.status === 'pending' ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViolationGroupAction(relatedLineKeys, 'reject')}
+                        className="text-red-600 hover:text-red-700 h-6 px-2 text-xs"
+                      >
+                        <XIcon className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleViolationGroupAction(relatedLineKeys, 'accept')}
+                        className="bg-green-600 hover:bg-green-700 h-6 px-2 text-xs"
+                      >
+                        <Check className="w-3 h-3" />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Badge 
+                        variant={primaryFix.status === 'accepted' ? 'default' : 'destructive'}
+                        className="text-xs h-5"
+                      >
+                        {primaryFix.status}
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleGroupReset(relatedLineKeys)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+              {showPlaceholder && (
+                <>
+                  {relatedLineKeys.length > 1 && (
+                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded opacity-30">
+                      {relatedLineKeys.length}
+                    </span>
+                  )}
+                  {/* Fixed width placeholder to match button area */}
+                  <div className="w-16 h-6 opacity-0"></div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -1015,11 +1024,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         onScroll={(e) => handleScroll(e, !!isOriginal)}
         style={{ height: 'calc(100% - 40px)' }}
       >
-        <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
+        <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={{ lineHeight: '28px', margin: 0, padding: 0 }}>
           <code className="block">
             {code ? (
               isOriginal !== undefined ? (
-                <div className="space-y-0">
+                <div>
                   {highlightDifferencesWithActions(code, isOriginal)}
                 </div>
               ) : (
@@ -1148,10 +1157,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       className="overflow-auto h-[calc(100vh-320px)]"
                       onScroll={(e) => handleScroll(e, true)}
                     >
-                      <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
+                      <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={{ lineHeight: '28px', margin: 0, padding: 0 }}>
                         <code className="block">
                           {originalCode ? (
-                            <div className="space-y-0">
+                            <div>
                               {highlightDifferencesWithActions(originalCode, true)}
                             </div>
                           ) : (
@@ -1171,10 +1180,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       className="overflow-auto h-[calc(100vh-320px)]"
                       onScroll={(e) => handleScroll(e, false)}
                     >
-                      <pre className="p-2 text-xs font-mono whitespace-pre-wrap break-words leading-4">
+                      <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={{ lineHeight: '28px', margin: 0, padding: 0 }}>
                         <code className="block">
                           {fixedCode ? (
-                            <div className="space-y-0">
+                            <div>
                               {highlightDifferencesWithActions(fixedCode, false)}
                             </div>
                           ) : (
