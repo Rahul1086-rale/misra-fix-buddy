@@ -592,7 +592,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         changedLines.add(lineNum - 1);
       });
       highlightData.added_lines?.forEach((lineNum: number) => {
-        addedLines.add(lineNum - 1);
+        addedLines.add(lineNumber - 1);
       });
     }
     
@@ -619,12 +619,20 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           return changeType.type === 'deleted';
         });
       
+      // Check if this line corresponds to the current fix being reviewed
+      const isCurrentLine = currentFix && relatedLineKeys.includes(currentFix.line_key);
+      
       if (addedLines.has(index)) {
         className = 'bg-green-50 border-l-2 border-l-green-400 dark:bg-green-950/20 dark:border-l-green-500';
       } else if (changedLines.has(index)) {
         className = isOriginal 
           ? 'bg-red-50 border-l-2 border-l-red-400 dark:bg-red-950/20 dark:border-l-red-500'
           : 'bg-yellow-50 border-l-2 border-l-yellow-400 dark:bg-yellow-950/20 dark:border-l-yellow-500';
+      }
+      
+      // Add current line highlighting
+      if (isCurrentLine) {
+        className += ' ring-2 ring-blue-500 ring-inset bg-blue-50 dark:bg-blue-950/30';
       }
       
       // Only show buttons on the fixed side for primary line of each group
@@ -646,7 +654,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             </div>
             
             {/* Action buttons area - fixed width to maintain alignment */}
-            <div className="w-32 flex-shrink-0 flex justify-end items-center gap-1 pr-2" style={{ minHeight: '28px' }}>
+            <div className="w-36 flex-shrink-0 flex justify-end items-center gap-1 pr-2" style={{ minHeight: '28px' }}>
               {showButtons && primaryFix && (
                 <>
                   {relatedLineKeys.length > 1 && (
@@ -684,7 +692,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                         variant="outline"
                         size="sm"
                         onClick={() => handleGroupReset(relatedLineKeys)}
-                        className="h-6 px-2 text-xs"
+                        className="h-6 px-1.5 text-xs ml-1"
                       >
                         <RotateCcw className="w-3 h-3" />
                       </Button>
@@ -715,7 +723,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                       <div className="text-xs h-5 px-2 rounded opacity-0 pointer-events-none flex items-center">
                         {primaryFix?.status || 'pending'}
                       </div>
-                      <div className="h-6 px-2 opacity-0 pointer-events-none border rounded text-xs flex items-center">
+                      <div className="h-6 px-1.5 opacity-0 pointer-events-none border rounded text-xs flex items-center ml-1">
                         <RotateCcw className="w-3 h-3" />
                       </div>
                     </>
@@ -1078,7 +1086,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 </span>
               )}
             </div>
-            <div className="flex gap-1 w-full sm:w-auto justify-end">
+            <div className="flex gap-2 w-full sm:w-auto justify-end">
               <Button
                 variant="outline"
                 size="sm"
@@ -1087,6 +1095,15 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                className="flex items-center gap-1 text-xs h-7"
+              >
+                <X className="w-3 h-3" />
+                Close
               </Button>
             </div>
           </DialogTitle>
