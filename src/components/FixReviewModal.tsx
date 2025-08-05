@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Eye, Code2, Check, X as XIcon, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -592,7 +593,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         changedLines.add(lineNum - 1);
       });
       highlightData.added_lines?.forEach((lineNum: number) => {
-        addedLines.add(lineNumber - 1);
+        addedLines.add(lineNum - 1);
       });
     }
     
