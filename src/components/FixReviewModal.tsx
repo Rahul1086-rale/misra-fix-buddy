@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Eye, Code2, Check, X as XIcon, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -413,9 +412,13 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const lineMatch = fix.line_key.match(/^(\d+)/);
     if (lineMatch) {
       const lineNumber = parseInt(lineMatch[1]);
-      // Scroll both panes to the approximate line
+      // Scroll both panes to center the line on screen
       if (originalScrollRef.current && fixedScrollRef.current) {
-        const scrollPosition = Math.max(0, (lineNumber - 5) * 28); // Use fixed line height of 28px
+        const lineHeight = 28; // Fixed line height
+        const containerHeight = originalScrollRef.current.clientHeight;
+        const centerOffset = containerHeight / 2;
+        const scrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - centerOffset);
+        
         originalScrollRef.current.scrollTop = scrollPosition;
         fixedScrollRef.current.scrollTop = scrollPosition;
       }
@@ -1092,19 +1095,10 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-1 text-xs h-7"
+                className="flex items-center gap-1 text-xs h-7 ml-4"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onClose}
-                className="flex items-center gap-1 text-xs h-7"
-              >
-                <X className="w-3 h-3" />
-                Close
               </Button>
             </div>
           </DialogTitle>
@@ -1249,9 +1243,6 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center pt-3 border-t gap-2 flex-shrink-0">
-            <Button variant="outline" onClick={onClose} className="w-full sm:w-auto text-xs h-8">
-              Close
-            </Button>
             <Button 
               onClick={downloadAcceptedFixes}
               disabled={isLoading || (summary?.accepted_count === 0)}
