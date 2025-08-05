@@ -1,3 +1,4 @@
+
 // API utility functions for MISRA Fix Copilot
 
 export interface ApiResponse<T = any> {
@@ -261,6 +262,57 @@ class ApiClient {
   async getViolationMapping(projectId: string): Promise<ApiResponse<Record<string, any>>> {
     return this.request(`/violation-mapping/${projectId}`, {
       method: 'GET',
+    });
+  }
+
+  // Fix-related endpoints for FixReviewModal
+  async getFixes(projectId: string): Promise<ApiResponse<Array<{
+    line_key: string;
+    content: string;
+    status: 'accepted' | 'rejected' | 'pending';
+  }>>> {
+    return this.request(`/fixes/${projectId}`, {
+      method: 'GET',
+    });
+  }
+
+  async updateFixStatus(projectId: string, lineKey: string, action: 'accept' | 'reject'): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request('/fix/status', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, line_key: lineKey, action }),
+    });
+  }
+
+  async resetFixStatus(projectId: string, lineKey: string): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request('/fix/reset', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, line_key: lineKey }),
+    });
+  }
+
+  async resetFixesStatus(projectId: string, lineKeys: string[]): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request('/fixes/reset', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, line_keys: lineKeys }),
+    });
+  }
+
+  async updateFixesStatus(projectId: string, lineKeys: string[], action: 'accept' | 'reject'): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return this.request('/fixes/status', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, line_keys: lineKeys, action }),
     });
   }
 }

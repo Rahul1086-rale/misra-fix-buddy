@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Check, RotateCcw, Eye, Code2 } from 'lucide-react';
+import { X, Check, RotateCcw, Eye, Code2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -257,10 +257,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     if (state.selectedViolations) {
       state.selectedViolations.forEach(violation => {
         const line = violation.line;
+        const lineKey = line.toString(); // Use line number as key since violation doesn't have a key property
         if (violationMapping[line]) {
-          violationMapping[line].push(violation.key);
+          violationMapping[line].push(lineKey);
         } else {
-          violationMapping[line] = [violation.key];
+          violationMapping[line] = [lineKey];
         }
       });
     }
@@ -314,7 +315,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           
           // Get violation group info for this line
           const violationGroup = getViolationGroupForLine(lineNum);
-          const relatedLineKeys = violationGroup ? violationGroup.lines.map(l => l.toString()) : [lineKey];
+          const relatedLineKeys = violationGroup ? violationGroup.violations : [lineKey];
           
           // Determine line highlighting
           let bgColor = '';
@@ -400,7 +401,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                         </>
                       )}
                       {!shouldShowGroupButtons(lineNum, relatedLineKeys) && (
-                        <div className="h-6 w-16"></div> // Placeholder to maintain alignment
+                        <div className="h-6 w-16"></div>
                       )}
                     </>
                   ) : (
