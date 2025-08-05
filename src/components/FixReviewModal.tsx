@@ -629,14 +629,14 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       
       // Only show buttons on the fixed side for primary line of each group
       const showButtons = !isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
-      // Show placeholder space on original side to maintain alignment
+      // Show invisible placeholder on original side to maintain alignment
       const showPlaceholder = isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       
       return (
         <div key={index} className={`${className} group relative`} style={{ minHeight: '28px', lineHeight: '28px' }}>
-          <div className="flex items-center min-h-[28px]">
+          <div className="flex items-center" style={{ minHeight: '28px' }}>
             {/* Line number - fixed width */}
-            <div className="w-12 flex-shrink-0 text-right pr-2 text-muted-foreground text-xs font-mono">
+            <div className="w-12 flex-shrink-0 text-right pr-2 text-muted-foreground text-xs font-mono" style={{ lineHeight: '28px' }}>
               {actualLineNumber}
             </div>
             
@@ -646,11 +646,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             </div>
             
             {/* Action buttons area - fixed width to maintain alignment */}
-            <div className="w-32 flex-shrink-0 flex justify-end items-center gap-1 pr-2">
+            <div className="w-32 flex-shrink-0 flex justify-end items-center gap-1 pr-2" style={{ minHeight: '28px' }}>
               {showButtons && primaryFix && (
                 <>
                   {relatedLineKeys.length > 1 && (
-                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded">
+                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded h-5 flex items-center">
                       {relatedLineKeys.length}
                     </span>
                   )}
@@ -694,13 +694,32 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
               )}
               {showPlaceholder && (
                 <>
+                  {/* Invisible count badge placeholder */}
                   {relatedLineKeys.length > 1 && (
-                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded opacity-30">
+                    <span className="text-xs px-1 h-5 flex items-center opacity-0 pointer-events-none">
                       {relatedLineKeys.length}
                     </span>
                   )}
-                  {/* Fixed width placeholder to match button area */}
-                  <div className="w-16 h-6 opacity-0"></div>
+                  {/* Invisible button placeholders with exact same dimensions as real buttons */}
+                  {primaryFix && primaryFix.status === 'pending' ? (
+                    <>
+                      <div className="h-6 px-2 opacity-0 pointer-events-none border rounded text-xs flex items-center">
+                        <XIcon className="w-3 h-3" />
+                      </div>
+                      <div className="h-6 px-2 opacity-0 pointer-events-none rounded text-xs flex items-center">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xs h-5 px-2 rounded opacity-0 pointer-events-none flex items-center">
+                        {primaryFix?.status || 'pending'}
+                      </div>
+                      <div className="h-6 px-2 opacity-0 pointer-events-none border rounded text-xs flex items-center">
+                        <RotateCcw className="w-3 h-3" />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
