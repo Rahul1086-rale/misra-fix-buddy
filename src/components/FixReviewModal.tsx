@@ -412,15 +412,22 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     const lineMatch = fix.line_key.match(/^(\d+)/);
     if (lineMatch) {
       const lineNumber = parseInt(lineMatch[1]);
-      // Scroll both panes to center the line on screen
+      // Scroll both panes to center the line on screen with better scaling support
       if (originalScrollRef.current && fixedScrollRef.current) {
         const lineHeight = 28; // Fixed line height
-        const containerHeight = originalScrollRef.current.clientHeight;
-        const centerOffset = containerHeight / 2;
-        const scrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - centerOffset);
+        const originalContainer = originalScrollRef.current;
+        const fixedContainer = fixedScrollRef.current;
         
-        originalScrollRef.current.scrollTop = scrollPosition;
-        fixedScrollRef.current.scrollTop = scrollPosition;
+        // Use actual container heights for better centering
+        const originalCenterOffset = originalContainer.clientHeight / 2;
+        const fixedCenterOffset = fixedContainer.clientHeight / 2;
+        
+        // Calculate scroll position to center the target line
+        const originalScrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - originalCenterOffset + (lineHeight / 2));
+        const fixedScrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - fixedCenterOffset + (lineHeight / 2));
+        
+        originalContainer.scrollTop = originalScrollPosition;
+        fixedContainer.scrollTop = fixedScrollPosition;
       }
     }
   };
@@ -1095,7 +1102,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-1 text-xs h-7 ml-4"
+                className="flex items-center gap-1 text-xs h-7 ml-8"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
