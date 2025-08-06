@@ -407,30 +407,35 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
     }
   };
 
-  const scrollToFix = (fix: Fix) => {
-    // Extract line number from line_key (e.g., "123" or "123a")
-    const lineMatch = fix.line_key.match(/^(\d+)/);
-    if (lineMatch) {
-      const lineNumber = parseInt(lineMatch[1]);
-      // Scroll both panes to center the line on screen with better scaling support
-      if (originalScrollRef.current && fixedScrollRef.current) {
-        const lineHeight = 28; // Fixed line height
-        const originalContainer = originalScrollRef.current;
-        const fixedContainer = fixedScrollRef.current;
-        
-        // Use actual container heights for better centering
-        const originalCenterOffset = originalContainer.clientHeight / 2;
-        const fixedCenterOffset = fixedContainer.clientHeight / 2;
-        
-        // Calculate scroll position to center the target line
-        const originalScrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - originalCenterOffset + (lineHeight / 2));
-        const fixedScrollPosition = Math.max(0, (lineNumber - 1) * lineHeight - fixedCenterOffset + (lineHeight / 2));
-        
-        originalContainer.scrollTop = originalScrollPosition;
-        fixedContainer.scrollTop = fixedScrollPosition;
-      }
-    }
-  };
+const scrollToFix = (fix: Fix) => {
+  const lineMatch = fix.line_key.match(/^(\d+)/);
+  if (!lineMatch) return;
+
+  const lineNumber = parseInt(lineMatch[1]);
+  const selector = `[data-line-number="${lineNumber}"]`;
+
+  const originalLine = originalScrollRef.current?.querySelector(selector) as HTMLElement;
+  const fixedLine = fixedScrollRef.current?.querySelector(selector) as HTMLElement;
+
+  if (!originalLine || !fixedLine || !originalScrollRef.current || !fixedScrollRef.current) return;
+
+  const originalContainer = originalScrollRef.current;
+  const fixedContainer = fixedScrollRef.current;
+
+  const originalLineRect = originalLine.getBoundingClientRect();
+  const originalContainerRect = originalContainer.getBoundingClientRect();
+  const fixedLineRect = fixedLine.getBoundingClientRect();
+  const fixedContainerRect = fixedContainer.getBoundingClientRect();
+
+  // Align line a bit below the top of the container (e.g., 60px from top)
+  const paddingTop = 60;
+
+  const originalOffset = originalLineRect.top - originalContainerRect.top;
+  const fixedOffset = fixedLineRect.top - fixedContainerRect.top;
+
+  originalContainer.scrollTop += originalOffset - paddingTop;
+  fixedContainer.scrollTop += fixedOffset - paddingTop;
+};
 
   const resetReview = async () => {
     if (!state.projectId) return;
@@ -652,7 +657,12 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
       const showPlaceholder = isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       
       return (
-        <div key={index} className={`${className} group relative`} style={{ minHeight: '28px', lineHeight: '28px' }}>
+        <div
+    key={index}
+    data-line-number={actualLineNumber}
+    className={`${className} group relative`}
+    style={{ minHeight: '28px', lineHeight: '28px' }}
+  >
           <div className="flex items-center" style={{ minHeight: '28px' }}>
             {/* Line number - fixed width */}
             <div className="w-12 flex-shrink-0 text-right pr-2 text-muted-foreground text-xs font-mono" style={{ lineHeight: '28px' }}>
@@ -1091,18 +1101,18 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
             <div className="flex items-center gap-2 flex-wrap">
               <Eye className="w-4 h-4" />
               <span className="text-sm">Code Fix Review</span>
-              {summary && (
+              {/* {summary && (
                 <span className="text-xs text-muted-foreground">
                   ({summary.accepted_count} accepted, {summary.rejected_count} rejected, {summary.pending_count} pending)
                 </span>
-              )}
+              )} */}
             </div>
             <div className="flex gap-2 w-full sm:w-auto justify-end">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-1 text-xs h-7 ml-8"
+                className="flex items-center gap-1 text-xs h-7 ml-8 -translate-x-7"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
