@@ -1,3 +1,4 @@
+
 # app.py - FastAPI Backend API Server
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,9 @@ import uuid
 import tempfile
 import json
 from pathlib import Path
+import asyncio
+import concurrent.futures
+import threading
 
 # Import our Python modules
 from misra_chat_client import init_vertex_ai, load_cpp_file, start_chat, send_file_intro, send_misra_violations
@@ -19,6 +23,7 @@ from replace import merge_fixed_snippets_into_file
 from fixed_response_code_snippet import extract_snippets_from_response, save_snippets_to_json, extract_violation_mapping, save_violation_mapping_to_json
 from diff_utils import create_temp_fixed_denumbered_file, get_file_content, create_diff_data, cleanup_temp_files
 from review_manager import ReviewManager
+from session_manager import session_manager
 
 app = FastAPI(
     title="MISRA Fix Copilot API",
@@ -35,10 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global storage for sessions
-sessions = {}
-chat_sessions = {}
-
 # Default model settings
 default_model_settings = {
     "model_name": "gemini-2.5-pro",
@@ -48,9 +49,6 @@ default_model_settings = {
     "safety_settings": False
 }
 
-# Global model settings storage
-model_settings = default_model_settings.copy()
-
 # Configure upload settings
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'cpp', 'c', 'xlsx', 'xls'}
@@ -58,10 +56,14 @@ ALLOWED_EXTENSIONS = {'cpp', 'c', 'xlsx', 'xls'}
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+# Thread pool for concurrent processing
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Pydantic models for request/response validation
+# ... keep existing code (Pydantic models for request/response validation) the same ...
+
 class LineNumbersRequest(BaseModel):
     projectId: str
 
@@ -119,7 +121,7 @@ class DiffResponse(BaseModel):
 class ReviewActionRequest(BaseModel):
     projectId: str
     line_key: str
-    action: str  # 'accept', 'reject', or 'reset'
+    action: str
 
 class NavigationRequest(BaseModel):
     projectId: str
@@ -134,23 +136,21 @@ class ReviewStateResponse(BaseModel):
 async def startup_event():
     init_vertex_ai()
 
-# Settings endpoints
+# ... keep existing code (settings endpoints) the same ...
+
 @app.get("/api/settings", response_model=ModelSettings)
 async def get_settings():
     """Get current model settings"""
-    return ModelSettings(**model_settings)
+    return ModelSettings(**default_model_settings)
 
 @app.post("/api/settings", response_model=SettingsResponse)
 async def save_settings(settings: ModelSettings):
     """Save model settings"""
     try:
-        global model_settings
-        model_settings = settings.dict()
-        
         # Optional: Save to file for persistence
         settings_file = os.path.join(UPLOAD_FOLDER, 'model_settings.json')
         with open(settings_file, 'w') as f:
-            json.dump(model_settings, f, indent=2)
+            json.dump(settings.dict(), f, indent=2)
         
         return SettingsResponse(
             success=True,
@@ -171,6 +171,9 @@ async def upload_cpp_file(
         if not allowed_file(file.filename):
             raise HTTPException(status_code=400, detail="Invalid file type")
         
+        # Get or create session
+        session = session_manager.get_or_create_session(projectId)
+        
         # Save uploaded file
         filename = file.filename
         file_path = os.path.join(UPLOAD_FOLDER, f"{projectId}_{filename}")
@@ -179,11 +182,9 @@ async def upload_cpp_file(
             content = await file.read()
             buffer.write(content)
         
-        # Initialize session
-        sessions[projectId] = {
-            'cpp_file': file_path,
-            'original_filename': filename
-        }
+        # Store in session
+        session.set_data('cpp_file', file_path)
+        session.set_data('original_filename', filename)
         
         return UploadResponse(
             filePath=file_path,
@@ -203,6 +204,9 @@ async def upload_misra_report(
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file selected")
         
+        # Get session
+        session = session_manager.get_or_create_session(projectId)
+        
         # Save Excel file
         filename = file.filename
         excel_path = os.path.join(UPLOAD_FOLDER, f"{projectId}_report_{filename}")
@@ -215,9 +219,8 @@ async def upload_misra_report(
         violations = extract_violations_for_file(excel_path, targetFile)
         
         # Store in session
-        if projectId in sessions:
-            sessions[projectId]['excel_file'] = excel_path
-            sessions[projectId]['violations'] = violations
+        session.set_data('excel_file', excel_path)
+        session.set_data('violations', violations)
         
         return violations
         
@@ -228,22 +231,24 @@ async def upload_misra_report(
 async def process_add_line_numbers(request: LineNumbersRequest):
     try:
         project_id = request.projectId
+        session = session_manager.get_session(project_id)
         
-        if project_id not in sessions:
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        input_file = session['cpp_file']
+        input_file = session.get_data('cpp_file')
+        if not input_file:
+            raise HTTPException(status_code=404, detail="No file found for project")
         
         # Create numbered file with .txt extension
-        original_name = Path(session['original_filename']).stem
+        original_name = Path(session.get_data('original_filename', 'file.cpp')).stem
         numbered_filename = f"numbered_{original_name}.txt"
         numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_{numbered_filename}")
         
         add_line_numbers(input_file, numbered_path)
         
         # Update session
-        sessions[project_id]['numbered_file'] = numbered_path
+        session.set_data('numbered_file', numbered_path)
         
         return ProcessResponse(numberedFilePath=numbered_path)
         
@@ -254,23 +259,25 @@ async def process_add_line_numbers(request: LineNumbersRequest):
 async def gemini_first_prompt(request: FirstPromptRequest):
     try:
         project_id = request.projectId
+        session = session_manager.get_session(project_id)
         
-        if project_id not in sessions:
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        numbered_file = session['numbered_file']
+        numbered_file = session.get_data('numbered_file')
+        if not numbered_file:
+            raise HTTPException(status_code=404, detail="Numbered file not found")
         
         # Load numbered file content
         numbered_content = load_cpp_file(numbered_file)
         
         # Start chat session with current model settings
         chat = start_chat(
-            model_name=model_settings['model_name'],
-            temperature=model_settings['temperature'],
-            top_p=model_settings['top_p'],
-            max_tokens=model_settings['max_tokens'],
-            safety_settings=model_settings['safety_settings']
+            model_name=default_model_settings['model_name'],
+            temperature=default_model_settings['temperature'],
+            top_p=default_model_settings['top_p'],
+            max_tokens=default_model_settings['max_tokens'],
+            safety_settings=default_model_settings['safety_settings']
         )
         
         # Send first prompt
@@ -284,7 +291,7 @@ async def gemini_first_prompt(request: FirstPromptRequest):
             )
         
         # Store chat session
-        chat_sessions[project_id] = chat
+        session.set_chat_session(chat)
         
         return GeminiResponse(response=response)
         
@@ -293,22 +300,16 @@ async def gemini_first_prompt(request: FirstPromptRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-import logging
-import traceback
-
-@app.post("/api/gemini/fix-violations", response_model=FixViolationsResponse)
-async def gemini_fix_violations(request: FixViolationsRequest):
+def process_violations_sync(project_id: str, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Synchronous function to process violations - runs in thread pool"""
     try:
-        project_id = request.projectId
-        violations = request.violations
+        session = session_manager.get_session(project_id)
+        if not session:
+            raise Exception("Project not found")
         
-        print(f"Processing project_id: {project_id}")  # Debug
-        print(f"Number of violations: {len(violations)}")  # Debug
-        
-        if project_id not in chat_sessions:
-            raise HTTPException(status_code=404, detail="Chat session not found")
-        
-        chat = chat_sessions[project_id]
+        chat = session.get_chat_session()
+        if not chat:
+            raise Exception("Chat session not found")
         
         # Format violations for Gemini
         violations_text = []
@@ -322,91 +323,99 @@ async def gemini_fix_violations(request: FixViolationsRequest):
             )
         
         violations_str = "\n".join(violations_text)
-        print(f"Formatted violations length: {len(violations_str)}")  # Debug
+        print(f"Processing {len(violations)} violations for project {project_id}")
         
         # Send to Gemini
-        print("Sending to Gemini...")  # Debug
         response = send_misra_violations(chat, violations_str)
-        print(f"Gemini response received: {response is not None}")  # Debug
         
-        # Check if response is None (blocked by safety filters)
         if response is None:
-            raise HTTPException(
-                status_code=422, 
-                detail="Response was blocked by safety filters. Please try with different content or contact support."
-            )
+            raise Exception("Response was blocked by safety filters")
         
         # Extract code snippets
-        print("Extracting snippets...")  # Debug
         code_snippets = extract_snippets_from_response(response)
-        print(f"Extracted {len(code_snippets)} snippets")  # Debug
         
         # Extract violation mapping
         violation_mapping = {}
         try:
-            print("Extracting violation mapping...")  # Debug
             violation_mapping = extract_violation_mapping(response)
-            print(f"Extracted violation mapping for {len(violation_mapping)} violations")  # Debug
         except Exception as e:
-            print(f"Warning: Could not extract violation mapping: {str(e)}")  # Debug
+            print(f"Warning: Could not extract violation mapping: {str(e)}")
         
         # Save snippets to session
-        if project_id in sessions:
-            print("Saving snippets to session...")  # Debug
-            sessions[project_id]['fixed_snippets'] = code_snippets
-            sessions[project_id]['violation_mapping'] = violation_mapping
-            snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
-            violation_mapping_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_violation_mapping.json")
-            save_snippets_to_json(code_snippets, snippet_file)
-            save_violation_mapping_to_json(violation_mapping, violation_mapping_file)
-            sessions[project_id]['snippet_file'] = snippet_file
-            sessions[project_id]['violation_mapping_file'] = violation_mapping_file
-            print(f"Snippets saved to: {snippet_file}")  # Debug
-            print(f"Violation mapping saved to: {violation_mapping_file}")  # Debug
-            
-            # Create temporary fixed files for immediate diff view
-            try:
-                session = sessions[project_id]
-                numbered_file = session.get('numbered_file')
-                if numbered_file:
-                    temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
-                        numbered_file, code_snippets, project_id, UPLOAD_FOLDER
-                    )
-                    session['temp_fixed_numbered'] = temp_fixed_numbered_path
-                    session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
-                    print(f"Created temporary fixed files for project {project_id}")
-            except Exception as e:
-                print(f"Error creating temporary fixed files: {str(e)}")
+        session.set_data('fixed_snippets', code_snippets)
+        session.set_data('violation_mapping', violation_mapping)
         
-        return FixViolationsResponse(
-            response=response,
-            codeSnippets=[{"code": snippet} for snippet in code_snippets.values()]
+        snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
+        violation_mapping_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_violation_mapping.json")
+        
+        save_snippets_to_json(code_snippets, snippet_file)
+        save_violation_mapping_to_json(violation_mapping, violation_mapping_file)
+        
+        session.set_data('snippet_file', snippet_file)
+        session.set_data('violation_mapping_file', violation_mapping_file)
+        
+        # Create temporary fixed files for immediate diff view
+        numbered_file = session.get_data('numbered_file')
+        if numbered_file:
+            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                numbered_file, code_snippets, project_id, UPLOAD_FOLDER
+            )
+            session.set_data('temp_fixed_numbered', temp_fixed_numbered_path)
+            session.set_data('temp_fixed_denumbered', temp_fixed_denumbered_path)
+        
+        return {
+            'response': response,
+            'code_snippets': code_snippets
+        }
+        
+    except Exception as e:
+        print(f"Error processing violations for project {project_id}: {str(e)}")
+        raise e
+
+@app.post("/api/gemini/fix-violations", response_model=FixViolationsResponse)
+async def gemini_fix_violations(request: FixViolationsRequest):
+    try:
+        project_id = request.projectId
+        violations = request.violations
+        
+        print(f"Starting async violation processing for project {project_id}")
+        
+        # Process violations in thread pool for true concurrency
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            executor, 
+            process_violations_sync, 
+            project_id, 
+            violations
         )
         
-    except HTTPException:
-        raise
+        return FixViolationsResponse(
+            response=result['response'],
+            codeSnippets=[{"code": snippet} for snippet in result['code_snippets'].values()]
+        )
+        
     except Exception as e:
-        # Add detailed error logging
         print(f"Error in gemini_fix_violations: {str(e)}")
-        print(f"Error type: {type(e)}")
-        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+# ... keep existing code (remaining endpoints with session manager integration) the same ...
 
 @app.post("/api/process/apply-fixes", response_model=ApplyFixesResponse)
 async def process_apply_fixes(request: ApplyFixesRequest):
     try:
         project_id = request.projectId
+        session = session_manager.get_session(project_id)
         
-        if project_id not in sessions:
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        numbered_file = session['numbered_file']
-        fixed_snippets = session.get('fixed_snippets', {})
+        numbered_file = session.get_data('numbered_file')
+        fixed_snippets = session.get_data('fixed_snippets', {})
+        original_filename = session.get_data('original_filename', 'file.cpp')
         
         # Apply fixes
-        fixed_filename = f"fixed_{session['original_filename']}"
-        fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{session['original_filename']}")
+        fixed_filename = f"fixed_{original_filename}"
+        fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{original_filename}")
         
         merge_fixed_snippets_into_file(numbered_file, fixed_snippets, fixed_numbered_path)
         
@@ -415,7 +424,7 @@ async def process_apply_fixes(request: ApplyFixesRequest):
         remove_line_numbers(fixed_numbered_path, final_fixed_path)
         
         # Update session
-        sessions[project_id]['fixed_file'] = final_fixed_path
+        session.set_data('fixed_file', final_fixed_path)
         
         return ApplyFixesResponse(fixedFilePath=final_fixed_path)
         
@@ -425,23 +434,65 @@ async def process_apply_fixes(request: ApplyFixesRequest):
 @app.get("/api/download/fixed-file")
 async def download_fixed_file(projectId: str = Query(...)):
     try:
-        if projectId not in sessions:
+        session = session_manager.get_session(projectId)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[projectId]
-        fixed_file = session.get('fixed_file')
+        fixed_file = session.get_data('fixed_file')
+        original_filename = session.get_data('original_filename', 'file.cpp')
         
         if not fixed_file or not os.path.exists(fixed_file):
             raise HTTPException(status_code=404, detail="Fixed file not found")
         
         return FileResponse(
             path=fixed_file,
-            filename=f"fixed_{session['original_filename']}",
+            filename=f"fixed_{original_filename}",
             media_type='application/octet-stream'
         )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def process_chat_message_sync(project_id: str, message: str) -> str:
+    """Synchronous chat processing - runs in thread pool"""
+    try:
+        session = session_manager.get_session(project_id)
+        if not session:
+            raise Exception("Project not found")
+        
+        chat_session = session.get_chat_session()
+        if not chat_session:
+            raise Exception("Chat session not found")
+        
+        # Send message to Gemini
+        response = chat_session.send_message(message)
+        
+        # Check if response is None or blocked
+        if response is None or response.text is None:
+            raise Exception("Response was blocked by safety filters")
+        
+        # Extract code snippets from response and save to session
+        code_snippets = extract_snippets_from_response(response.text)
+        
+        # Save snippets to session (same as fix-violations endpoint)
+        session.set_data('fixed_snippets', code_snippets)
+        snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
+        save_snippets_to_json(code_snippets, snippet_file)
+        session.set_data('snippet_file', snippet_file)
+        
+        # Update temporary fixed file for real-time diff view
+        numbered_file = session.get_data('numbered_file')
+        if numbered_file:
+            temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
+                numbered_file, code_snippets, project_id, UPLOAD_FOLDER
+            )
+            session.set_data('temp_fixed_numbered', temp_fixed_numbered_path)
+            session.set_data('temp_fixed_denumbered', temp_fixed_denumbered_path)
+        
+        return response.text
+        
+    except Exception as e:
+        raise e
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -449,75 +500,40 @@ async def chat(request: ChatRequest):
         message = request.message
         project_id = request.projectId
         
-        if project_id not in chat_sessions:
-            raise HTTPException(status_code=404, detail="Chat session not found")
+        print(f"Starting async chat processing for project {project_id}")
         
-        chat_session = chat_sessions[project_id]
+        # Process chat message in thread pool for concurrency
+        loop = asyncio.get_event_loop()
+        response_text = await loop.run_in_executor(
+            executor, 
+            process_chat_message_sync, 
+            project_id, 
+            message
+        )
         
-        # Send message to Gemini
-        response = chat_session.send_message(message)
+        return ChatResponse(response=response_text)
         
-        # Check if response is None or blocked
-        if response is None or response.text is None:
-            raise HTTPException(
-                status_code=422, 
-                detail="Response was blocked by safety filters. Please try rephrasing your message."
-            )
-        
-        # Extract code snippets from response and save to session
-        if project_id in sessions:
-            print("Extracting snippets from chat response...")  # Debug
-            code_snippets = extract_snippets_from_response(response.text)
-            print(f"Extracted {len(code_snippets)} snippets from chat")  # Debug
-            
-            # Save snippets to session (same as fix-violations endpoint)
-            sessions[project_id]['fixed_snippets'] = code_snippets
-            snippet_file = os.path.join(UPLOAD_FOLDER, f"{project_id}_snippets.json")
-            save_snippets_to_json(code_snippets, snippet_file)
-            sessions[project_id]['snippet_file'] = snippet_file
-            print(f"Chat snippets saved to: {snippet_file}")  # Debug
-            
-            # Update temporary fixed file for real-time diff view
-            try:
-                session = sessions[project_id]
-                numbered_file = session.get('numbered_file')
-                if numbered_file:
-                    temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
-                        numbered_file, code_snippets, project_id, UPLOAD_FOLDER
-                    )
-                    session['temp_fixed_numbered'] = temp_fixed_numbered_path
-                    session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
-                    print(f"Updated temporary fixed files for project {project_id}")
-            except Exception as e:
-                print(f"Error updating temporary fixed files: {str(e)}")
-        
-        return ChatResponse(response=response.text)
-        
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ... keep existing code (remaining endpoints) the same ...
+
 @app.get("/api/session-state")
 async def get_session_state():
-    # Return empty state for now
     return {}
 
 @app.post("/api/session-state")
 async def save_session_state():
-    # For now, just return success
     return {"success": True}
 
-# New diff endpoints for Fix View Modal
 @app.get("/api/files/numbered/{project_id}")
 async def get_numbered_file(project_id: str):
-    """Get numbered file content"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        numbered_file = session.get('numbered_file')
+        numbered_file = session.get_data('numbered_file')
         
         if not numbered_file or not os.path.exists(numbered_file):
             raise HTTPException(status_code=404, detail="Numbered file not found")
@@ -533,20 +549,16 @@ async def get_numbered_file(project_id: str):
 
 @app.get("/api/files/temp-fixed/{project_id}")
 async def get_temp_fixed_file(project_id: str):
-    """Get temporary fixed file content"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        
-        # Get existing temp fixed file path if it exists
-        temp_fixed_numbered_path = session.get('temp_fixed_numbered')
+        temp_fixed_numbered_path = session.get_data('temp_fixed_numbered')
         
         if not temp_fixed_numbered_path or not os.path.exists(temp_fixed_numbered_path):
-            # If temp file doesn't exist, create it
-            fixed_snippets = session.get('fixed_snippets', {})
-            numbered_file = session.get('numbered_file')
+            fixed_snippets = session.get_data('fixed_snippets', {})
+            numbered_file = session.get_data('numbered_file')
             
             if not numbered_file:
                 raise HTTPException(status_code=404, detail="Numbered file not found")
@@ -555,11 +567,9 @@ async def get_temp_fixed_file(project_id: str):
                 numbered_file, fixed_snippets, project_id, UPLOAD_FOLDER
             )
             
-            # Store paths in session
-            session['temp_fixed_numbered'] = temp_fixed_numbered_path
-            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+            session.set_data('temp_fixed_numbered', temp_fixed_numbered_path)
+            session.set_data('temp_fixed_denumbered', temp_fixed_denumbered_path)
         
-        # Return the fixed numbered content (with line numbers for diff view)
         content = get_file_content(temp_fixed_numbered_path)
         if content is None:
             raise HTTPException(status_code=500, detail="Failed to read temporary fixed file")
@@ -571,30 +581,26 @@ async def get_temp_fixed_file(project_id: str):
 
 @app.get("/api/diff/{project_id}", response_model=DiffResponse)
 async def get_diff(project_id: str):
-    """Get diff between original and fixed files"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        original_file = session.get('cpp_file')  # Original file
-        fixed_snippets = session.get('fixed_snippets', {})
-        numbered_file = session.get('numbered_file')
+        original_file = session.get_data('cpp_file')
+        fixed_snippets = session.get_data('fixed_snippets', {})
+        numbered_file = session.get_data('numbered_file')
         
         if not original_file or not numbered_file:
             raise HTTPException(status_code=404, detail="Required files not found")
         
-        # Create temporary fixed denumbered file for comparison with original
         temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
             numbered_file, fixed_snippets, project_id, UPLOAD_FOLDER
         )
         
-        # Create diff data comparing original with fixed denumbered file
         diff_data = create_diff_data(original_file, temp_fixed_denumbered_path, fixed_snippets)
         
-        # Store temp paths in session for potential cleanup
-        session['temp_fixed_numbered'] = temp_fixed_numbered_path
-        session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+        session.set_data('temp_fixed_numbered', temp_fixed_numbered_path)
+        session.set_data('temp_fixed_denumbered', temp_fixed_denumbered_path)
         
         return DiffResponse(**diff_data)
         
@@ -602,16 +608,14 @@ async def get_diff(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # New Review Management Endpoints
-
 @app.get("/api/review/state/{project_id}", response_model=ReviewStateResponse)
 async def get_review_state(project_id: str):
-    """Get current review state for all fixes"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        fixed_snippets = session.get('fixed_snippets', {})
+        fixed_snippets = session.get_data('fixed_snippets', {})
         
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
         fixes = review_manager.get_fix_list(fixed_snippets)
@@ -624,13 +628,13 @@ async def get_review_state(project_id: str):
 
 @app.post("/api/review/action")
 async def review_action(request: ReviewActionRequest):
-    """Accept or reject a specific fix"""
     try:
         project_id = request.projectId
         line_key = request.line_key
         action = request.action
         
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
@@ -642,20 +646,19 @@ async def review_action(request: ReviewActionRequest):
         elif action == "reset":
             review_manager.reset_line(line_key)
         else:
-            raise HTTPException(status_code=400, detail="Invalid action. Use 'accept', 'reject', or 'reset'")
+            raise HTTPException(status_code=400, detail="Invalid action")
         
         # Update temporary files with only accepted changes
-        session = sessions[project_id]
-        fixed_snippets = session.get('fixed_snippets', {})
-        numbered_file = session.get('numbered_file')
+        fixed_snippets = session.get_data('fixed_snippets', {})
+        numbered_file = session.get_data('numbered_file')
         
         if numbered_file:
             accepted_snippets = review_manager.get_accepted_snippets(fixed_snippets)
             temp_fixed_numbered_path, temp_fixed_denumbered_path = create_temp_fixed_denumbered_file(
                 numbered_file, accepted_snippets, project_id, UPLOAD_FOLDER
             )
-            session['temp_fixed_numbered'] = temp_fixed_numbered_path
-            session['temp_fixed_denumbered'] = temp_fixed_denumbered_path
+            session.set_data('temp_fixed_numbered', temp_fixed_numbered_path)
+            session.set_data('temp_fixed_denumbered', temp_fixed_denumbered_path)
         
         return {"success": True, "message": f"Line {line_key} {action}ed successfully"}
         
@@ -664,12 +667,12 @@ async def review_action(request: ReviewActionRequest):
 
 @app.post("/api/review/navigate")
 async def navigate_review(request: NavigationRequest):
-    """Set current review navigation index"""
     try:
         project_id = request.projectId
         index = request.index
         
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
@@ -682,14 +685,12 @@ async def navigate_review(request: NavigationRequest):
 
 @app.get("/api/code-snippets/{project_id}")
 async def get_code_snippets(project_id: str):
-    """Get code snippets for a project"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        fixed_snippets = session.get('fixed_snippets', {})
-        
+        fixed_snippets = session.get_data('fixed_snippets', {})
         return fixed_snippets
         
     except Exception as e:
@@ -697,14 +698,12 @@ async def get_code_snippets(project_id: str):
 
 @app.get("/api/violation-mapping/{project_id}")
 async def get_violation_mapping(project_id: str):
-    """Get violation mapping for a project"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        violation_mapping = session.get('violation_mapping', {})
-        
+        violation_mapping = session.get_data('violation_mapping', {})
         return violation_mapping
         
     except Exception as e:
@@ -712,9 +711,9 @@ async def get_violation_mapping(project_id: str):
 
 @app.post("/api/review/reset/{project_id}")
 async def reset_review(project_id: str):
-    """Reset all review decisions for a project"""
     try:
-        if project_id not in sessions:
+        session = session_manager.get_session(project_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
@@ -727,24 +726,24 @@ async def reset_review(project_id: str):
 
 @app.post("/api/process/apply-accepted-fixes", response_model=ApplyFixesResponse)
 async def process_apply_accepted_fixes(request: ApplyFixesRequest):
-    """Apply only the accepted fixes to create final file"""
     try:
         project_id = request.projectId
+        session = session_manager.get_session(project_id)
         
-        if project_id not in sessions:
+        if not session:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        session = sessions[project_id]
-        numbered_file = session['numbered_file']
-        all_fixed_snippets = session.get('fixed_snippets', {})
+        numbered_file = session.get_data('numbered_file')
+        all_fixed_snippets = session.get_data('fixed_snippets', {})
+        original_filename = session.get_data('original_filename', 'file.cpp')
         
         # Get only accepted snippets
         review_manager = ReviewManager(project_id, UPLOAD_FOLDER)
         accepted_snippets = review_manager.get_accepted_snippets(all_fixed_snippets)
         
         # Apply only accepted fixes
-        fixed_filename = f"fixed_{session['original_filename']}"
-        fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{session['original_filename']}")
+        fixed_filename = f"fixed_{original_filename}"
+        fixed_numbered_path = os.path.join(UPLOAD_FOLDER, f"{project_id}_fixed_numbered_{original_filename}")
         
         merge_fixed_snippets_into_file(numbered_file, accepted_snippets, fixed_numbered_path)
         
@@ -753,7 +752,7 @@ async def process_apply_accepted_fixes(request: ApplyFixesRequest):
         remove_line_numbers(fixed_numbered_path, final_fixed_path)
         
         # Update session
-        sessions[project_id]['fixed_file'] = final_fixed_path
+        session.set_data('fixed_file', final_fixed_path)
         
         return ApplyFixesResponse(fixedFilePath=final_fixed_path)
         
