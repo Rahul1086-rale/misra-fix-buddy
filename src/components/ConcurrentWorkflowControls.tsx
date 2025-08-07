@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { 
   Hash, 
@@ -37,14 +36,19 @@ export default function ConcurrentWorkflowControls() {
       
       const response = await concurrentApiClient.addLineNumbers(state.projectId);
       
-      if (response.success && response.data) {
-        dispatch({ type: 'SET_NUMBERED_FILE', payload: { 
-          name: `numbered_${state.uploadedFile.name}`, 
-          path: response.data.numberedFilePath 
-        }});
-        dispatch({ type: 'SET_CURRENT_STEP', payload: 'numbering' });
-        toast({ title: "Success", description: "Line numbers added successfully" });
-        completeRequest(requestId);
+      if (response.success && response.data && typeof response.data === 'object' && response.data !== null) {
+        const data = response.data as { numberedFilePath?: string };
+        if (data.numberedFilePath) {
+          dispatch({ type: 'SET_NUMBERED_FILE', payload: { 
+            name: `numbered_${state.uploadedFile.name}`, 
+            path: data.numberedFilePath 
+          }});
+          dispatch({ type: 'SET_CURRENT_STEP', payload: 'numbering' });
+          toast({ title: "Success", description: "Line numbers added successfully" });
+          completeRequest(requestId);
+        } else {
+          throw new Error('Invalid response: missing numberedFilePath');
+        }
       } else {
         throw new Error(response.error || 'Failed to add line numbers');
       }
@@ -72,17 +76,22 @@ export default function ConcurrentWorkflowControls() {
       
       const response = await concurrentApiClient.sendFirstPrompt(state.projectId);
       
-      if (response.success && response.data) {
-        const message = { 
-          id: uuidv4(), 
-          type: 'assistant' as const, 
-          content: response.data.response, 
-          timestamp: new Date() 
-        };
-        dispatch({ type: 'ADD_MESSAGE', payload: message });
-        dispatch({ type: 'SET_CURRENT_STEP', payload: 'chat' });
-        toast({ title: "Success", description: "Chat session initialized with Gemini" });
-        completeRequest(requestId);
+      if (response.success && response.data && typeof response.data === 'object' && response.data !== null) {
+        const data = response.data as { response?: string };
+        if (data.response) {
+          const message = { 
+            id: uuidv4(), 
+            type: 'assistant' as const, 
+            content: data.response, 
+            timestamp: new Date() 
+          };
+          dispatch({ type: 'ADD_MESSAGE', payload: message });
+          dispatch({ type: 'SET_CURRENT_STEP', payload: 'chat' });
+          toast({ title: "Success", description: "Chat session initialized with Gemini" });
+          completeRequest(requestId);
+        } else {
+          throw new Error('Invalid response: missing response content');
+        }
       } else {
         throw new Error(response.error || 'Failed to initialize chat');
       }
@@ -114,17 +123,22 @@ export default function ConcurrentWorkflowControls() {
       
       updateRequest(requestId, { progress: 75 });
       
-      if (response.success && response.data) {
-        const message = { 
-          id: uuidv4(), 
-          type: 'assistant' as const, 
-          content: response.data.response, 
-          timestamp: new Date() 
-        };
-        dispatch({ type: 'ADD_MESSAGE', payload: message });
-        dispatch({ type: 'SET_CURRENT_STEP', payload: 'fixing' });
-        toast({ title: "Success", description: "Violations fixed by Gemini" });
-        completeRequest(requestId);
+      if (response.success && response.data && typeof response.data === 'object' && response.data !== null) {
+        const data = response.data as { response?: string };
+        if (data.response) {
+          const message = { 
+            id: uuidv4(), 
+            type: 'assistant' as const, 
+            content: data.response, 
+            timestamp: new Date() 
+          };
+          dispatch({ type: 'ADD_MESSAGE', payload: message });
+          dispatch({ type: 'SET_CURRENT_STEP', payload: 'fixing' });
+          toast({ title: "Success", description: "Violations fixed by Gemini" });
+          completeRequest(requestId);
+        } else {
+          throw new Error('Invalid response: missing response content');
+        }
       } else {
         throw new Error(response.error || 'Failed to fix violations');
       }
