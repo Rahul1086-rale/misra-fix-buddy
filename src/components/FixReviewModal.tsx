@@ -156,25 +156,7 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
         
         // Auto-advance to next pending fix with actual changes
         setTimeout(() => {
-          const changedFixes = getActualChangedFixes();
-          const currentChanged = changedFixes.find(fix => fix.line_key === fixes[currentFixIndex]?.line_key);
-          const currentChangedIndex = currentChanged ? changedFixes.indexOf(currentChanged) : -1;
-          
-          // Find next pending fix with actual changes
-          const nextPendingFix = changedFixes
-            .slice(currentChangedIndex + 1)
-            .find(fix => fix.status === 'pending');
-          
-          if (nextPendingFix) {
-            const nextIndex = updatedFixes.findIndex(fix => fix.line_key === nextPendingFix.line_key);
-            if (nextIndex !== -1 && nextIndex !== currentFixIndex) {
-              setCurrentFixIndex(nextIndex);
-              if (state.projectId) {
-                apiClient.navigateReview(state.projectId, nextIndex);
-              }
-              scrollToFix(nextPendingFix);
-            }
-          }
+          navigateToNextChange();
         }, 100);
       }
     } catch (error) {
@@ -267,6 +249,11 @@ export default function FixReviewModal({ isOpen, onClose }: FixReviewModalProps)
           setFixedCode(diffResponse.data.fixed);
           setHighlightData(diffResponse.data.highlight);
         }
+
+        // Auto-advance to next pending fix
+        setTimeout(() => {
+          navigateToNextChange();
+        }, 100);
       }
     } catch (error) {
       toast({
@@ -582,6 +569,18 @@ const scrollToFix = (fix: Fix) => {
     return lineKey === primaryLine;
   };
 
+  // Get the position of current line within the group (for "X of Y" display)
+  const getLinePositionInGroup = (lineKey: string): { position: number; total: number } => {
+    const violationGroup = getViolationGroupForLine(lineKey);
+    const sortedGroup = violationGroup.sort((a, b) => {
+      const aNum = parseInt(a.match(/^(\d+)/)?.[1] || '0');
+      const bNum = parseInt(b.match(/^(\d+)/)?.[1] || '0');
+      return aNum - bNum || a.localeCompare(b);
+    });
+    const position = sortedGroup.indexOf(lineKey) + 1;
+    return { position, total: sortedGroup.length };
+  };
+
   // Resolve conflicts when same line is in multiple violations
   const resolveLineConflicts = (lineKey: string): 'accepted' | 'rejected' | 'pending' => {
     const fix = fixes.find(f => f.line_key === lineKey);
@@ -656,6 +655,10 @@ const scrollToFix = (fix: Fix) => {
       // Show invisible placeholder on original side to maintain alignment
       const showPlaceholder = isOriginal && hasActualChanges && shouldShowGroupButtons(lineKey);
       
+      // Get line position info for group display
+      const lineInfo = getLinePositionInGroup(lineKey);
+      const isGroupLine = relatedLineKeys.length > 1;
+      
       return (
         <div
     key={index}
@@ -670,19 +673,20 @@ const scrollToFix = (fix: Fix) => {
             </div>
             
             {/* Code content - flexible width */}
-            <div className="flex-1 font-mono text-xs px-2 break-all" style={{ lineHeight: '28px' }}>
+            <div className="flex-1 font-mono text-xs px-2 break-all relative" style={{ lineHeight: '28px' }}>
+              {/* Group line indicator at top right of code content */}
+              {isGroupLine && hasActualChanges && (
+                <div className="absolute -top-2 right-2 text-xs text-muted-foreground px-1 bg-background/80 rounded border text-[10px] leading-tight">
+                  {lineInfo.position} of {lineInfo.total} lines
+                </div>
+              )}
               {isOriginal && isDeletedLine ? `${line || '\u00A0'} (deleted)` : (line || '\u00A0')}
             </div>
             
             {/* Action buttons area - fixed width to maintain alignment */}
-            <div className="w-36 flex-shrink-0 flex justify-end items-center gap-1 pr-2" style={{ minHeight: '28px' }}>
+            <div className="w-20 flex-shrink-0 flex justify-end items-center gap-1 pr-2" style={{ minHeight: '28px' }}>
               {showButtons && primaryFix && (
                 <>
-                  {relatedLineKeys.length > 1 && (
-                    <span className="text-xs text-muted-foreground px-1 bg-muted rounded h-5 flex items-center">
-                      {relatedLineKeys.length}
-                    </span>
-                  )}
                   {primaryFix.status === 'pending' ? (
                     <>
                       <Button
@@ -723,12 +727,6 @@ const scrollToFix = (fix: Fix) => {
               )}
               {showPlaceholder && (
                 <>
-                  {/* Invisible count badge placeholder */}
-                  {relatedLineKeys.length > 1 && (
-                    <span className="text-xs px-1 h-5 flex items-center opacity-0 pointer-events-none">
-                      {relatedLineKeys.length}
-                    </span>
-                  )}
                   {/* Invisible button placeholders with exact same dimensions as real buttons */}
                   {primaryFix && primaryFix.status === 'pending' ? (
                     <>
@@ -1101,18 +1099,13 @@ const scrollToFix = (fix: Fix) => {
             <div className="flex items-center gap-2 flex-wrap">
               <Eye className="w-4 h-4" />
               <span className="text-sm">Code Fix Review</span>
-              {/* {summary && (
-                <span className="text-xs text-muted-foreground">
-                  ({summary.accepted_count} accepted, {summary.rejected_count} rejected, {summary.pending_count} pending)
-                </span>
-              )} */}
             </div>
             <div className="flex gap-2 w-full sm:w-auto justify-end">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-1 text-xs h-7 ml-8 -translate-x-7"
+                className="flex items-center gap-1 text-xs h-7"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
@@ -1122,29 +1115,9 @@ const scrollToFix = (fix: Fix) => {
         </DialogHeader>
 
         <div className="flex-1 flex flex-col min-h-0 p-3 space-y-3">
-          {/* Navigation and Bulk Action Controls */}
+          {/* Bulk Action Controls */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted rounded-lg gap-3 flex-shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={navigateToPreviousChange}
-                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) <= 0}
-                className="text-xs h-7"
-              >
-                <ChevronLeft className="w-3 h-3" />
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={navigateToNextChange}
-                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) >= getActualChangedFixes().length - 1}
-                className="text-xs h-7"
-              >
-                Next
-                <ChevronRight className="w-3 h-3" />
-              </Button>
               {currentFix && (
                 <span className="text-xs text-muted-foreground">
                   Change {getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) + 1} of {getActualChangedFixes().length}
@@ -1186,7 +1159,7 @@ const scrollToFix = (fix: Fix) => {
               </TabsList>
 
               <TabsContent value="inline" className="flex-1 mt-2 min-h-0">
-                <div className="h-[calc(100vh-280px)] overflow-auto border rounded-lg">
+                <div className="h-[calc(100vh-340px)] overflow-auto border rounded-lg">
                   <div className="p-3">
                     {renderInlineDiffView()}
                   </div>
@@ -1194,7 +1167,7 @@ const scrollToFix = (fix: Fix) => {
               </TabsContent>
 
               <TabsContent value="diff" className="flex-1 mt-2 min-h-0">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-[calc(100vh-340px)] border rounded-lg overflow-hidden">
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 p-2 border-b bg-muted">
                       <Code2 className="w-3 h-3" />
@@ -1202,7 +1175,7 @@ const scrollToFix = (fix: Fix) => {
                     </div>
                     <div 
                       ref={originalScrollRef}
-                      className="overflow-auto h-[calc(100vh-320px)]"
+                      className="overflow-auto h-[calc(100vh-380px)]"
                       onScroll={(e) => handleScroll(e, true)}
                     >
                       <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={{ lineHeight: '28px', margin: 0, padding: 0 }}>
@@ -1225,7 +1198,7 @@ const scrollToFix = (fix: Fix) => {
                     </div>
                     <div 
                       ref={fixedScrollRef}
-                      className="overflow-auto h-[calc(100vh-320px)]"
+                      className="overflow-auto h-[calc(100vh-380px)]"
                       onScroll={(e) => handleScroll(e, false)}
                     >
                       <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={{ lineHeight: '28px', margin: 0, padding: 0 }}>
@@ -1245,21 +1218,93 @@ const scrollToFix = (fix: Fix) => {
               </TabsContent>
 
               <TabsContent value="original" className="flex-1 mt-2 min-h-0">
-                <div className="h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                <div className="h-[calc(100vh-340px)] border rounded-lg overflow-hidden">
                   {renderCodeBlock(originalCode, "Original Code")}
                 </div>
               </TabsContent>
 
               <TabsContent value="fixed" className="flex-1 mt-2 min-h-0">
-                <div className="h-[calc(100vh-280px)] border rounded-lg overflow-hidden">
+                <div className="h-[calc(100vh-340px)] border rounded-lg overflow-hidden">
                   {renderCodeBlock(fixedCode, "Fixed Code (Accepted Changes Only)")}
                 </div>
               </TabsContent>
             </Tabs>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row justify-end items-stretch sm:items-center pt-3 border-t gap-2 flex-shrink-0">
+          {/* Bottom Navigation and Action Controls */}
+          <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center pt-3 border-t gap-3 flex-shrink-0">
+            {/* Navigation Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={navigateToPreviousChange}
+                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) <= 0}
+                className="text-xs h-8"
+              >
+                <ChevronLeft className="w-3 h-3 mr-1" />
+                Previous
+              </Button>
+              
+              {/* Accept/Reject buttons for current fix */}
+              {currentFix && (
+                <>
+                  {currentFix.status === 'pending' ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const violationGroup = getViolationGroupForLine(currentFix.line_key);
+                          handleViolationGroupAction(violationGroup, 'reject');
+                        }}
+                        className="text-red-600 hover:text-red-700 text-xs h-8"
+                      >
+                        <XIcon className="w-3 h-3 mr-1" />
+                        Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const violationGroup = getViolationGroupForLine(currentFix.line_key);
+                          handleViolationGroupAction(violationGroup, 'accept');
+                        }}
+                        className="bg-green-600 hover:bg-green-700 text-xs h-8"
+                      >
+                        <Check className="w-3 h-3 mr-1" />
+                        Accept
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const violationGroup = getViolationGroupForLine(currentFix.line_key);
+                        handleGroupReset(violationGroup);
+                      }}
+                      className="text-gray-600 hover:text-gray-700 text-xs h-8"
+                    >
+                      <RotateCcw className="w-3 h-3 mr-1" />
+                      Reset
+                    </Button>
+                  )}
+                </>
+              )}
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={navigateToNextChange}
+                disabled={!currentFix || getActualChangedFixes().findIndex(f => f.line_key === currentFix.line_key) >= getActualChangedFixes().length - 1}
+                className="text-xs h-8"
+              >
+                Next
+                <ChevronRight className="w-3 h-3 ml-1" />
+              </Button>
+            </div>
+
+            {/* Download Button */}
             <Button 
               onClick={downloadAcceptedFixes}
               disabled={isLoading || (summary?.accepted_count === 0)}
