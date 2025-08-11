@@ -1105,7 +1105,7 @@ const scrollToFix = (fix: Fix) => {
                 variant="outline"
                 size="sm"
                 onClick={resetReview}
-                className="flex items-center gap-1 text-xs h-7"
+                className="flex items-center gap-1 text-xs h-7 ml-8 -translate-x-7"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reset
