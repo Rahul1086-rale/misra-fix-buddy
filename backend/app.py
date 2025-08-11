@@ -7,13 +7,14 @@ import os
 
 app = FastAPI(title="MISRA Fix Copilot Backend", version="1.0.0")
 
-# Configure CORS
+# Configure CORS - more permissive for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Frontend URLs
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"],  # Add more frontend URLs
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicitly include OPTIONS
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Include authentication routes
@@ -26,6 +27,11 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "message": "Backend is operational"}
+
+# Add OPTIONS handler for all routes
+@app.options("/{full_path:path}")
+async def options_handler():
+    return {"message": "OK"}
 
 @app.on_event("startup")
 async def startup_event():
