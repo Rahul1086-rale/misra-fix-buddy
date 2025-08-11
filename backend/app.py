@@ -24,6 +24,8 @@ from fixed_response_code_snippet import extract_snippets_from_response, save_sni
 from diff_utils import create_temp_fixed_denumbered_file, get_file_content, create_diff_data, cleanup_temp_files
 from review_manager import ReviewManager
 from session_manager import session_manager
+from auth_endpoints import router as auth_router
+from auth_db import setup_default_users
 
 app = FastAPI(
     title="MISRA Fix Copilot API",
@@ -39,6 +41,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include authentication router
+app.include_router(auth_router)
+
+# ... keep existing code (default model settings, upload settings, thread pool, allowed_file function, Pydantic models) the same ...
 
 # Default model settings
 default_model_settings = {
@@ -61,8 +68,6 @@ executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# ... keep existing code (Pydantic models for request/response validation) the same ...
 
 class LineNumbersRequest(BaseModel):
     projectId: str
@@ -131,12 +136,13 @@ class ReviewStateResponse(BaseModel):
     fixes: List[Dict[str, Any]]
     summary: Dict[str, Any]
 
-# Initialize Vertex AI on startup
+# Initialize Vertex AI and setup database on startup
 @app.on_event("startup")
 async def startup_event():
     init_vertex_ai()
+    setup_default_users()
 
-# ... keep existing code (settings endpoints) the same ...
+# ... keep existing code (all other endpoints remain the same) ...
 
 @app.get("/api/settings", response_model=ModelSettings)
 async def get_settings():
@@ -398,7 +404,7 @@ async def gemini_fix_violations(request: FixViolationsRequest):
         print(f"Error in gemini_fix_violations: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
-# ... keep existing code (remaining endpoints with session manager integration) the same ...
+# ... keep existing code (all remaining endpoints remain exactly the same) ...
 
 @app.post("/api/process/apply-fixes", response_model=ApplyFixesResponse)
 async def process_apply_fixes(request: ApplyFixesRequest):
@@ -515,8 +521,6 @@ async def chat(request: ChatRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# ... keep existing code (remaining endpoints) the same ...
 
 @app.get("/api/session-state")
 async def get_session_state():
