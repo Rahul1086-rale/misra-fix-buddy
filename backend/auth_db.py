@@ -55,21 +55,6 @@ class AuthDatabase:
             print(f"Error creating user: {e}")
             return False
     
-    def user_exists(self, username: str) -> bool:
-        """Check if a user exists"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-            result = cursor.fetchone()
-            conn.close()
-            
-            return result is not None
-        except Exception as e:
-            print(f"Error checking user existence: {e}")
-            return False
-    
     def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, str]]:
         """Authenticate user with username and password"""
         try:
@@ -111,11 +96,12 @@ class AuthDatabase:
             print(f"Error getting users: {e}")
             return []
 
+# Initialize database and create default users
 def setup_default_users():
-    """Setup default users for the application (only if they don't exist)"""
+    """Setup default users for the application"""
     auth_db = AuthDatabase()
     
-    # Create default users only if they don't exist
+    # Create default users (similar to the JSON file)
     default_users = [
         {"username": "admin", "password": "admin123", "role": "admin"},
         {"username": "user", "password": "user123", "role": "user"},
@@ -123,15 +109,11 @@ def setup_default_users():
     ]
     
     for user in default_users:
-        if not auth_db.user_exists(user["username"]):
-            success = auth_db.create_user(user["username"], user["password"], user["role"])
-            if success:
-                print(f"✅ Created default user: {user['username']}")
-            else:
-                print(f"❌ Failed to create user: {user['username']}")
+        success = auth_db.create_user(user["username"], user["password"], user["role"])
+        if success:
+            print(f"Created user: {user['username']}")
         else:
-            print(f"ℹ️  User '{user['username']}' already exists, skipping...")
+            print(f"User {user['username']} already exists")
 
 if __name__ == "__main__":
-    print("Setting up default users...")
     setup_default_users()
