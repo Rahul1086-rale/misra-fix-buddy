@@ -1,7 +1,7 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from auth_db import AuthDatabase
+from auth_db import AuthDatabase, setup_default_users
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
@@ -53,6 +53,15 @@ async def create_user(request: CreateUserRequest):
             return {"success": False, "message": "Username already exists"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+
+@router.post("/setup-default-users")
+async def setup_default_users_endpoint():
+    """Setup default users (admin, user, reviewer) - can be called manually"""
+    try:
+        setup_default_users()
+        return {"success": True, "message": "Default users setup completed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error setting up default users: {str(e)}")
 
 @router.get("/users")
 async def get_users():
