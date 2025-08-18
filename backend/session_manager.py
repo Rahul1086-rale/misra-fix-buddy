@@ -47,33 +47,33 @@ class ProjectSession:
             self.update_access_time()
             self.chat_session = chat_session
     
-    def save_model_settings(self, settings: Dict[str, Any]):
-        """Save model settings for this session"""
+    def save_model_settings(self, settings: Dict[str, Any], username: str):
+        """Save model settings for this user"""
         with self._lock:
             self.update_access_time()
-            settings_file = f"{self.project_id}_model_setting.json"
+            settings_file = f"{username}_model_setting.json"
             try:
                 with open(settings_file, 'w') as f:
                     json.dump(settings, f, indent=2)
                 return True
             except Exception as e:
-                print(f"Error saving model settings for session {self.project_id}: {e}")
+                print(f"Error saving model settings for user {username}: {e}")
                 return False
     
-    def load_model_settings(self) -> Optional[Dict[str, Any]]:
-        """Load model settings for this session"""
+    def load_model_settings(self, username: str) -> Optional[Dict[str, Any]]:
+        """Load model settings for this user"""
         with self._lock:
             self.update_access_time()
-            settings_file = f"{self.project_id}_model_setting.json"
+            settings_file = f"{username}_model_setting.json"
             
             if os.path.exists(settings_file):
                 try:
                     with open(settings_file, 'r') as f:
                         return json.load(f)
                 except Exception as e:
-                    print(f"Error loading model settings for session {self.project_id}: {e}")
+                    print(f"Error loading model settings for user {username}: {e}")
             
-            # Return default settings if no session-specific settings exist
+            # Return default settings if no user-specific settings exist
             return {
                 "temperature": 0.5,
                 "top_p": 0.95,
@@ -81,6 +81,22 @@ class ProjectSession:
                 "model_name": "gemini-1.5-flash",
                 "safety_settings": False
             }
+    
+    def delete_model_settings(self, username: str) -> bool:
+        """Delete model settings file for this user"""
+        with self._lock:
+            self.update_access_time()
+            settings_file = f"{username}_model_setting.json"
+            
+            if os.path.exists(settings_file):
+                try:
+                    os.remove(settings_file)
+                    print(f"Deleted model settings for user {username}")
+                    return True
+                except Exception as e:
+                    print(f"Error deleting model settings for user {username}: {e}")
+                    return False
+            return False
 
 class ConcurrentSessionManager:
     """Thread-safe session manager for handling multiple concurrent requests"""
