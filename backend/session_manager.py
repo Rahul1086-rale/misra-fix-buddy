@@ -5,6 +5,8 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import uuid
+import json
+import os
 
 @dataclass
 class ProjectSession:
@@ -44,6 +46,42 @@ class ProjectSession:
         with self._lock:
             self.update_access_time()
             self.chat_session = chat_session
+    
+    def get_settings(self):
+        """Get session-specific settings"""
+        with self._lock:
+            self.update_access_time()
+            settings_file = f"{self.project_id}_default_setting.json"
+            
+            if os.path.exists(settings_file):
+                try:
+                    with open(settings_file, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    print(f"Error loading session settings: {e}")
+            
+            # Return default settings if file doesn't exist
+            return {
+                "temperature": 0.5,
+                "top_p": 0.95,
+                "max_tokens": 65535,
+                "model_name": "gemini-1.5-flash",
+                "safety_settings": False
+            }
+    
+    def save_settings(self, settings: Dict[str, Any]):
+        """Save session-specific settings"""
+        with self._lock:
+            self.update_access_time()
+            settings_file = f"{self.project_id}_default_setting.json"
+            
+            try:
+                with open(settings_file, 'w') as f:
+                    json.dump(settings, f, indent=2)
+                return True
+            except Exception as e:
+                print(f"Error saving session settings: {e}")
+                return False
 
 class ConcurrentSessionManager:
     """Thread-safe session manager for handling multiple concurrent requests"""
@@ -95,6 +133,14 @@ class ConcurrentSessionManager:
             
             for project_id in expired_sessions:
                 self._sessions.pop(project_id, None)
+                # Optionally clean up session settings file
+                settings_file = f"{project_id}_default_setting.json"
+                if os.path.exists(settings_file):
+                    try:
+                        os.remove(settings_file)
+                        print(f"Cleaned up settings file: {settings_file}")
+                    except Exception as e:
+                        print(f"Error cleaning up settings file {settings_file}: {e}")
         
         print(f"Cleaned up {len(expired_sessions)} expired sessions")
     

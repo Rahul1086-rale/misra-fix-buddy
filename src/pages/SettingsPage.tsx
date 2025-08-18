@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,20 +14,59 @@ import { useToast } from '@/hooks/use-toast';
 export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
   const { toast } = useToast();
-  const { modelSettings } = state;
+  const { modelSettings, projectId } = state;
+
+  // Load session-specific settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (!projectId) return;
+      
+      try {
+        const response = await fetch('/api/settings', {
+          headers: {
+            'X-Project-ID': projectId,
+          },
+        });
+
+        if (response.ok) {
+          const settings = await response.json();
+          dispatch({
+            type: 'UPDATE_MODEL_SETTINGS',
+            payload: settings
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      }
+    };
+
+    loadSettings();
+  }, [projectId, dispatch]);
 
   const handleSaveSettings = async () => {
+    if (!projectId) {
+      toast({
+        title: "Error",
+        description: "No active session. Please start a new session.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const response = await fetch('/api/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Project-ID': projectId,
+        },
         body: JSON.stringify(modelSettings),
       });
 
       if (response.ok) {
         toast({
           title: "Success",
-          description: "Settings saved successfully",
+          description: "Settings saved successfully for this session",
         });
       } else {
         throw new Error('Failed to save settings');
@@ -61,6 +100,11 @@ export default function SettingsPage() {
             </Button>
           </Link>
           <h1 className="text-2xl font-bold">Settings</h1>
+          {projectId && (
+            <span className="text-sm text-muted-foreground">
+              Session: {projectId.slice(0, 8)}...
+            </span>
+          )}
         </div>
       </header>
 
@@ -68,6 +112,9 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Model Configuration</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Settings are saved per session and will be used for all AI interactions in this session.
+            </p>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Model Selection */}
@@ -163,9 +210,13 @@ export default function SettingsPage() {
 
             {/* Save Button */}
             <div className="pt-4">
-              <Button onClick={handleSaveSettings} className="w-full">
+              <Button 
+                onClick={handleSaveSettings} 
+                className="w-full"
+                disabled={!projectId}
+              >
                 <Save className="w-4 h-4 mr-2" />
-                Save Settings
+                Save Settings {projectId ? 'for Session' : '(No Active Session)'}
               </Button>
             </div>
           </CardContent>
