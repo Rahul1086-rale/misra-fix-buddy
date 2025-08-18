@@ -5,8 +5,6 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import uuid
-import json
-import os
 
 @dataclass
 class ProjectSession:
@@ -16,7 +14,6 @@ class ProjectSession:
     last_accessed: datetime = field(default_factory=datetime.now)
     data: Dict[str, Any] = field(default_factory=dict)
     chat_session: Any = None
-    model_settings: Dict[str, Any] = field(default_factory=dict)
     _lock: threading.RLock = field(default_factory=threading.RLock)
     
     def update_access_time(self):
@@ -47,50 +44,6 @@ class ProjectSession:
         with self._lock:
             self.update_access_time()
             self.chat_session = chat_session
-
-    def get_model_settings(self):
-        """Thread-safe model settings retrieval"""
-        with self._lock:
-            self.update_access_time()
-            if not self.model_settings:
-                # Load from session-specific file or use defaults
-                self.model_settings = self._load_session_settings()
-            return self.model_settings
-    
-    def set_model_settings(self, settings: Dict[str, Any]):
-        """Thread-safe model settings storage"""
-        with self._lock:
-            self.update_access_time()
-            self.model_settings = settings
-            self._save_session_settings(settings)
-    
-    def _load_session_settings(self):
-        """Load session-specific settings from file"""
-        settings_file = f"{self.project_id}_default_cred.json"
-        if os.path.exists(settings_file):
-            try:
-                with open(settings_file, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading session settings: {e}")
-        
-        # Return default settings if file doesn't exist
-        return {
-            "temperature": 0.5,
-            "top_p": 0.95,
-            "max_tokens": 65535,
-            "model_name": "gemini-1.5-flash",
-            "safety_settings": False
-        }
-    
-    def _save_session_settings(self, settings: Dict[str, Any]):
-        """Save session-specific settings to file"""
-        settings_file = f"{self.project_id}_default_cred.json"
-        try:
-            with open(settings_file, 'w') as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            print(f"Error saving session settings: {e}")
 
 class ConcurrentSessionManager:
     """Thread-safe session manager for handling multiple concurrent requests"""
@@ -141,14 +94,6 @@ class ConcurrentSessionManager:
                     expired_sessions.append(project_id)
             
             for project_id in expired_sessions:
-                # Clean up session-specific settings file
-                settings_file = f"{project_id}_default_cred.json"
-                if os.path.exists(settings_file):
-                    try:
-                        os.remove(settings_file)
-                    except Exception as e:
-                        print(f"Error removing settings file: {e}")
-                
                 self._sessions.pop(project_id, None)
         
         print(f"Cleaned up {len(expired_sessions)} expired sessions")

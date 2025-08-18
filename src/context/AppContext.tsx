@@ -38,22 +38,22 @@ export interface AppState {
   excelFile: { name: string; path: string } | null;
   numberedFile: { name: string; path: string } | null;
   mergedFile: { name: string; path: string } | null;
-
+  
   // Violations
   violations: Violation[];
   selectedViolations: Violation[];
-
+  
   // Chat state
   messages: ChatMessage[];
   isProcessing: boolean;
-
+  
   // Workflow state
   currentStep: 'upload' | 'violations' | 'numbering' | 'chat' | 'fixing' | 'finalize';
   isLoading: boolean;
-
+  
   // Project state
   projectId: string | null;
-
+  
   // Legacy support
   currentVersion: number;
   chatHistory: ChatMessage[];
@@ -145,7 +145,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, projectId: action.payload };
     case 'RESET_STATE':
       return initialState;
-
+    
     // Legacy support
     case 'SET_SELECTED_VIOLATIONS':
       return { ...state, selectedViolations: action.payload };
@@ -167,7 +167,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, currentVersion: state.currentVersion + 1 };
     case 'LOAD_SESSION_STATE':
       return { ...state, ...action.payload };
-
+    
     default:
       return state;
   }
@@ -206,25 +206,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadSessionState = async () => {
     try {
-      // Load general session state
       const response = await fetch('/api/session-state');
       if (response.ok) {
         const sessionState = await response.json();
         dispatch({ type: 'LOAD_SESSION_STATE', payload: sessionState });
-        
-        // Load session-specific model settings if projectId exists
-        if (sessionState.projectId) {
-          const settingsResponse = await fetch(`/api/settings/${sessionState.projectId}`);
-          if (settingsResponse.ok) {
-            const settingsData = await settingsResponse.json();
-            if (settingsData.success) {
-              dispatch({ 
-                type: 'UPDATE_MODEL_SETTINGS', 
-                payload: settingsData.data 
-              });
-            }
-          }
-        }
       }
     } catch (error) {
       console.error('Failed to load session state:', error);
