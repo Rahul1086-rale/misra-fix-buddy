@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -15,10 +15,46 @@ export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
   const { toast } = useToast();
   const { modelSettings } = state;
+  
+  // Get username from localStorage (assuming it's stored after login)
+  const getUsername = () => {
+    const userData = localStorage.getItem('user');
+    if (userData) {
+      try {
+        const user = JSON.parse(userData);
+        return user.username || 'defaultuser';
+      } catch {
+        return 'defaultuser';
+      }
+    }
+    return 'defaultuser';
+  };
+
+  const username = getUsername();
+
+  // Load user-specific settings on component mount
+  useEffect(() => {
+    const loadUserSettings = async () => {
+      try {
+        const response = await fetch(`/api/settings?username=${encodeURIComponent(username)}`);
+        if (response.ok) {
+          const settings = await response.json();
+          dispatch({
+            type: 'UPDATE_MODEL_SETTINGS',
+            payload: settings
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load user settings:', error);
+      }
+    };
+
+    loadUserSettings();
+  }, [username, dispatch]);
 
   const handleSaveSettings = async () => {
     try {
-      const response = await fetch('/api/settings', {
+      const response = await fetch(`/api/settings?username=${encodeURIComponent(username)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(modelSettings),
@@ -37,6 +73,42 @@ export default function SettingsPage() {
       toast({
         title: "Error",
         description: "Failed to save settings",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleResetSettings = async () => {
+    try {
+      const response = await fetch(`/api/settings?username=${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Reset to default settings in the UI
+        dispatch({
+          type: 'UPDATE_MODEL_SETTINGS',
+          payload: {
+            temperature: 0.5,
+            top_p: 0.95,
+            max_tokens: 65535,
+            model_name: 'gemini-1.5-flash',
+            safety_settings: false,
+          }
+        });
+        
+        toast({
+          title: "Success",
+          description: "Settings reset to defaults",
+        });
+      } else {
+        throw new Error('Failed to reset settings');
+      }
+    } catch (error) {
+      console.error('Reset settings error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reset settings",
         variant: "destructive",
       });
     }
@@ -161,11 +233,15 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* Save Button */}
-            <div className="pt-4">
+            {/* Action Buttons */}
+            <div className="pt-4 space-y-3">
               <Button onClick={handleSaveSettings} className="w-full">
                 <Save className="w-4 h-4 mr-2" />
                 Save Settings
+              </Button>
+              <Button onClick={handleResetSettings} variant="outline" className="w-full">
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Reset to Defaults
               </Button>
             </div>
           </CardContent>

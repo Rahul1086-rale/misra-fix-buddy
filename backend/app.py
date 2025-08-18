@@ -145,15 +145,33 @@ async def startup_event():
 # ... keep existing code (all other endpoints remain the same) ...
 
 @app.get("/api/settings", response_model=ModelSettings)
-async def get_settings():
-    """Get current model settings"""
-    return ModelSettings(**default_model_settings)
+async def get_settings(username: str = Query(...)):
+    """Get current model settings for a specific user"""
+    try:
+        # Try to load user-specific settings
+        user_settings_file = os.path.join(UPLOAD_FOLDER, f'{username}_model_setting.json')
+        
+        if os.path.exists(user_settings_file):
+            with open(user_settings_file, 'r') as f:
+                user_settings = json.load(f)
+                return ModelSettings(**user_settings)
+        else:
+            # Return default settings if user-specific file doesn't exist
+            return ModelSettings(**default_model_settings)
+    except Exception as e:
+        # Fallback to default settings on any error
+        return ModelSettings(**default_model_settings)
 
 @app.post("/api/settings", response_model=SettingsResponse)
-async def save_settings(settings: ModelSettings):
-    """Save model settings"""
+async def save_settings(settings: ModelSettings, username: str = Query(...)):
+    """Save model settings for a specific user"""
     try:
-        # Optional: Save to file for persistence
+        # Save to user-specific file
+        user_settings_file = os.path.join(UPLOAD_FOLDER, f'{username}_model_setting.json')
+        with open(user_settings_file, 'w') as f:
+            json.dump(settings.dict(), f, indent=2)
+        
+        # Also save to generic file for backwards compatibility
         settings_file = os.path.join(UPLOAD_FOLDER, 'model_settings.json')
         with open(settings_file, 'w') as f:
             json.dump(settings.dict(), f, indent=2)
@@ -164,6 +182,26 @@ async def save_settings(settings: ModelSettings):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+
+@app.delete("/api/settings", response_model=SettingsResponse)
+async def delete_settings(username: str = Query(...)):
+    """Delete user-specific model settings file"""
+    try:
+        user_settings_file = os.path.join(UPLOAD_FOLDER, f'{username}_model_setting.json')
+        
+        if os.path.exists(user_settings_file):
+            os.remove(user_settings_file)
+            return SettingsResponse(
+                success=True,
+                message="User settings deleted successfully"
+            )
+        else:
+            return SettingsResponse(
+                success=True,
+                message="No user-specific settings found to delete"
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete settings: {str(e)}")
 
 @app.post("/api/upload/cpp-file", response_model=UploadResponse)
 async def upload_cpp_file(
