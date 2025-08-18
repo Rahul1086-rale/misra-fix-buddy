@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -232,6 +233,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     }
   };
+
+  // Load session-specific model settings when projectId changes
+  useEffect(() => {
+    const loadSessionSettings = async () => {
+      if (!state.projectId) return;
+      
+      try {
+        const response = await fetch(`/api/settings?sessionId=${state.projectId}`);
+        if (response.ok) {
+          const sessionSettings = await response.json();
+          dispatch({
+            type: 'UPDATE_MODEL_SETTINGS',
+            payload: sessionSettings
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load session settings:', error);
+      }
+    };
+
+    loadSessionSettings();
+  }, [state.projectId]);
 
   // Load session state on mount
   useEffect(() => {
