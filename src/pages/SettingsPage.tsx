@@ -54,7 +54,7 @@ export default function SettingsPage() {
       {/* Header */}
       <header className="border-b">
         <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Link to="/">
+          <Link to="/chat">
             <Button variant="outline" size="sm">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Chat
