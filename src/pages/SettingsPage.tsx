@@ -9,28 +9,17 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useAppContext } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
+  const { user } = useAuth();
   const { toast } = useToast();
   const { modelSettings } = state;
   
-  // Get username from localStorage (assuming it's stored after login)
-  const getUsername = () => {
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      try {
-        const user = JSON.parse(userData);
-        return user.username || 'defaultuser';
-      } catch {
-        return 'defaultuser';
-      }
-    }
-    return 'defaultuser';
-  };
-
-  const username = getUsername();
+  // Get username from auth context
+  const username = user?.username || 'defaultuser';
 
   // Load user-specific settings on component mount
   useEffect(() => {

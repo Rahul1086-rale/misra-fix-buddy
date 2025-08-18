@@ -171,11 +171,6 @@ async def save_settings(settings: ModelSettings, username: str = Query(...)):
         with open(user_settings_file, 'w') as f:
             json.dump(settings.dict(), f, indent=2)
         
-        # Also save to generic file for backwards compatibility
-        settings_file = os.path.join(UPLOAD_FOLDER, 'model_settings.json')
-        with open(settings_file, 'w') as f:
-            json.dump(settings.dict(), f, indent=2)
-        
         return SettingsResponse(
             success=True,
             message="Settings saved successfully"
