@@ -14,20 +14,23 @@ import { useToast } from '@/hooks/use-toast';
 export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
   const { toast } = useToast();
-  const { modelSettings } = state;
+  const { modelSettings, projectId } = state;
 
   const handleSaveSettings = async () => {
     try {
       const response = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(modelSettings),
+        body: JSON.stringify({
+          ...modelSettings,
+          projectId: projectId || 'default'
+        }),
       });
 
       if (response.ok) {
         toast({
           title: "Success",
-          description: "Settings saved successfully",
+          description: "Settings saved successfully for this session",
         });
       } else {
         throw new Error('Failed to save settings');
@@ -61,6 +64,11 @@ export default function SettingsPage() {
             </Button>
           </Link>
           <h1 className="text-2xl font-bold">Settings</h1>
+          {projectId && (
+            <span className="text-sm text-muted-foreground">
+              Session: {projectId.slice(0, 8)}...
+            </span>
+          )}
         </div>
       </header>
 
@@ -68,6 +76,9 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Model Configuration</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              These settings are specific to your current session
+            </p>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Model Selection */}
@@ -178,7 +189,10 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             <pre className="text-xs bg-muted p-4 rounded-lg overflow-auto">
-              {JSON.stringify(modelSettings, null, 2)}
+              {JSON.stringify({
+                ...modelSettings,
+                sessionId: projectId || 'default'
+              }, null, 2)}
             </pre>
           </CardContent>
         </Card>
