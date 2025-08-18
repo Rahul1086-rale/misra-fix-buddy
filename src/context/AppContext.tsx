@@ -38,22 +38,22 @@ export interface AppState {
   excelFile: { name: string; path: string } | null;
   numberedFile: { name: string; path: string } | null;
   mergedFile: { name: string; path: string } | null;
-
+  
   // Violations
   violations: Violation[];
   selectedViolations: Violation[];
-
+  
   // Chat state
   messages: ChatMessage[];
   isProcessing: boolean;
-
+  
   // Workflow state
   currentStep: 'upload' | 'violations' | 'numbering' | 'chat' | 'fixing' | 'finalize';
   isLoading: boolean;
-
+  
   // Project state
   projectId: string | null;
-
+  
   // Legacy support
   currentVersion: number;
   chatHistory: ChatMessage[];
@@ -119,8 +119,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_MERGED_FILE':
       return { ...state, mergedFile: action.payload };
     case 'SET_VIOLATIONS':
-      return {
-        ...state,
+      return { 
+        ...state, 
         violations: action.payload,
         currentStep: 'violations'
       };
@@ -145,20 +145,20 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, projectId: action.payload };
     case 'RESET_STATE':
       return initialState;
-
+    
     // Legacy support
     case 'SET_SELECTED_VIOLATIONS':
       return { ...state, selectedViolations: action.payload };
     case 'ADD_CHAT_MESSAGE':
-      return {
-        ...state,
+      return { 
+        ...state, 
         chatHistory: [...state.chatHistory, action.payload]
       };
     case 'SET_FIXED_SNIPPETS':
       return { ...state, fixedSnippets: action.payload };
     case 'UPDATE_MODEL_SETTINGS':
-      return {
-        ...state,
+      return { 
+        ...state, 
         modelSettings: { ...state.modelSettings, ...action.payload }
       };
     case 'SET_SESSION_ID':
@@ -167,7 +167,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, currentVersion: state.currentVersion + 1 };
     case 'LOAD_SESSION_STATE':
       return { ...state, ...action.payload };
-
+    
     default:
       return state;
   }
@@ -233,37 +233,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const loadSessionSettings = async (projectId: string) => {
-    try {
-      const response = await fetch('/api/settings', {
-        headers: {
-          'X-Project-ID': projectId,
-        },
-      });
-      
-      if (response.ok) {
-        const settings = await response.json();
-        dispatch({
-          type: 'UPDATE_MODEL_SETTINGS',
-          payload: settings
-        });
-      }
-    } catch (error) {
-      console.error('Failed to load session settings:', error);
-    }
-  };
-
   // Load session state on mount
   useEffect(() => {
     loadSessionState();
   }, []);
-
-  // Load session-specific settings when projectId changes
-  useEffect(() => {
-    if (state.projectId) {
-      loadSessionSettings(state.projectId);
-    }
-  }, [state.projectId]);
 
   // Save session state when it changes
   useEffect(() => {
