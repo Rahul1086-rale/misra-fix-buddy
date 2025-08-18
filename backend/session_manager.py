@@ -1,4 +1,3 @@
-
 import threading
 import asyncio
 from typing import Dict, Any, Optional
@@ -55,6 +54,7 @@ class ProjectSession:
             try:
                 with open(settings_file, 'w') as f:
                     json.dump(settings, f, indent=2)
+                print(f"Saved model settings for user {username} to {settings_file}")
                 return True
             except Exception as e:
                 print(f"Error saving model settings for user {username}: {e}")
@@ -66,27 +66,35 @@ class ProjectSession:
             self.update_access_time()
             settings_file = f"{username}_model_setting.json"
             
+            print(f"Looking for settings file: {settings_file}")
+            
             if os.path.exists(settings_file):
                 try:
                     with open(settings_file, 'r') as f:
-                        return json.load(f)
+                        settings = json.load(f)
+                    print(f"Loaded model settings for user {username} from {settings_file}")
+                    return settings
                 except Exception as e:
                     print(f"Error loading model settings for user {username}: {e}")
             
             # Return default settings if no user-specific settings exist
-            return {
+            default_settings = {
                 "temperature": 0.5,
                 "top_p": 0.95,
                 "max_tokens": 65535,
                 "model_name": "gemini-1.5-flash",
                 "safety_settings": False
             }
+            print(f"Using default settings for user {username}")
+            return default_settings
     
     def delete_model_settings(self, username: str) -> bool:
         """Delete model settings file for this user"""
         with self._lock:
             self.update_access_time()
             settings_file = f"{username}_model_setting.json"
+            
+            print(f"Attempting to delete settings file: {settings_file}")
             
             if os.path.exists(settings_file):
                 try:
@@ -96,7 +104,9 @@ class ProjectSession:
                 except Exception as e:
                     print(f"Error deleting model settings for user {username}: {e}")
                     return False
-            return False
+            else:
+                print(f"Settings file {settings_file} does not exist")
+                return False
 
 class ConcurrentSessionManager:
     """Thread-safe session manager for handling multiple concurrent requests"""
