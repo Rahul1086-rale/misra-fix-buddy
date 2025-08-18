@@ -1,7 +1,6 @@
-
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Save, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -10,61 +9,25 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useAppContext } from '@/context/AppContext';
-import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
-  const { user } = useAuth();
   const { toast } = useToast();
   const { modelSettings } = state;
 
-  // Load user-specific settings when component mounts or user changes
-  useEffect(() => {
-    const loadUserSettings = async () => {
-      if (!user?.username) return;
-      
-      try {
-        const response = await fetch(`/api/settings?username=${user.username}`);
-        if (response.ok) {
-          const userSettings = await response.json();
-          dispatch({
-            type: 'UPDATE_MODEL_SETTINGS',
-            payload: userSettings
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load user settings:', error);
-      }
-    };
-
-    loadUserSettings();
-  }, [user?.username, dispatch]);
-
   const handleSaveSettings = async () => {
-    if (!user?.username) {
-      toast({
-        title: "Error",
-        description: "No authenticated user. Please login first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     try {
       const response = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...modelSettings,
-          username: user.username
-        }),
+        body: JSON.stringify(modelSettings),
       });
 
       if (response.ok) {
         toast({
           title: "Success",
-          description: "Settings saved successfully for your account",
+          description: "Settings saved successfully",
         });
       } else {
         throw new Error('Failed to save settings');
@@ -74,53 +37,6 @@ export default function SettingsPage() {
       toast({
         title: "Error",
         description: "Failed to save settings",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleResetSettings = async () => {
-    if (!user?.username) {
-      toast({
-        title: "Error",
-        description: "No authenticated user. Please login first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/settings?username=${user.username}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        // Reset to default settings in the UI
-        const defaultSettings = {
-          temperature: 0.5,
-          top_p: 0.95,
-          max_tokens: 65535,
-          model_name: 'gemini-1.5-flash',
-          safety_settings: false,
-        };
-        
-        dispatch({
-          type: 'UPDATE_MODEL_SETTINGS',
-          payload: defaultSettings
-        });
-
-        toast({
-          title: "Success",
-          description: "Settings reset to default values",
-        });
-      } else {
-        throw new Error('Failed to reset settings');
-      }
-    } catch (error) {
-      console.error('Reset settings error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to reset settings",
         variant: "destructive",
       });
     }
@@ -145,11 +61,6 @@ export default function SettingsPage() {
             </Button>
           </Link>
           <h1 className="text-2xl font-bold">Settings</h1>
-          {user && (
-            <span className="text-sm text-muted-foreground">
-              User: {user.username}
-            </span>
-          )}
         </div>
       </header>
 
@@ -250,30 +161,13 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* Action Buttons */}
-            <div className="pt-4 flex gap-3">
-              <Button 
-                onClick={handleSaveSettings} 
-                className="flex-1"
-                disabled={!user}
-              >
+            {/* Save Button */}
+            <div className="pt-4">
+              <Button onClick={handleSaveSettings} className="w-full">
                 <Save className="w-4 h-4 mr-2" />
                 Save Settings
               </Button>
-              <Button 
-                onClick={handleResetSettings} 
-                variant="outline"
-                disabled={!user}
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset
-              </Button>
             </div>
-            {!user && (
-              <p className="text-xs text-muted-foreground mt-2 text-center">
-                Please login to save user-specific settings
-              </p>
-            )}
           </CardContent>
         </Card>
 
