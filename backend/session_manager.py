@@ -5,6 +5,8 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import uuid
+import json
+import os
 
 @dataclass
 class ProjectSession:
@@ -44,6 +46,37 @@ class ProjectSession:
         with self._lock:
             self.update_access_time()
             self.chat_session = chat_session
+    
+    def get_model_settings(self):
+        """Get model settings for this session"""
+        settings_file = f"{self.project_id}_model_setting.json"
+        try:
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading model settings for session {self.project_id}: {e}")
+        
+        # Return default settings if file doesn't exist
+        return {
+            "temperature": 0.5,
+            "top_p": 0.95,
+            "max_tokens": 65535,
+            "model_name": "gemini-1.5-flash",
+            "safety_settings": False
+        }
+    
+    def save_model_settings(self, settings: Dict[str, Any]):
+        """Save model settings for this session"""
+        settings_file = f"{self.project_id}_model_setting.json"
+        try:
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+            print(f"Model settings saved for session {self.project_id}")
+            return True
+        except Exception as e:
+            print(f"Error saving model settings for session {self.project_id}: {e}")
+            return False
 
 class ConcurrentSessionManager:
     """Thread-safe session manager for handling multiple concurrent requests"""

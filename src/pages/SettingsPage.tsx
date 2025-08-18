@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,13 +15,52 @@ import { useToast } from '@/hooks/use-toast';
 export default function SettingsPage() {
   const { state, dispatch } = useAppContext();
   const { toast } = useToast();
-  const { modelSettings } = state;
+  const { modelSettings, projectId } = state;
+
+  // Load settings when component mounts or projectId changes
+  useEffect(() => {
+    const loadSettings = async () => {
+      if (!projectId) return;
+      
+      try {
+        const response = await fetch('/api/settings', {
+          headers: {
+            'X-Project-ID': projectId,
+          },
+        });
+
+        if (response.ok) {
+          const settings = await response.json();
+          dispatch({
+            type: 'UPDATE_MODEL_SETTINGS',
+            payload: settings
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      }
+    };
+
+    loadSettings();
+  }, [projectId, dispatch]);
 
   const handleSaveSettings = async () => {
+    if (!projectId) {
+      toast({
+        title: "Error",
+        description: "Project ID is required to save settings",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const response = await fetch('/api/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Project-ID': projectId,
+        },
         body: JSON.stringify(modelSettings),
       });
 
@@ -61,6 +101,11 @@ export default function SettingsPage() {
             </Button>
           </Link>
           <h1 className="text-2xl font-bold">Settings</h1>
+          {projectId && (
+            <span className="text-sm text-muted-foreground">
+              Session: {projectId.slice(0, 8)}...
+            </span>
+          )}
         </div>
       </header>
 
@@ -163,10 +208,15 @@ export default function SettingsPage() {
 
             {/* Save Button */}
             <div className="pt-4">
-              <Button onClick={handleSaveSettings} className="w-full">
+              <Button onClick={handleSaveSettings} className="w-full" disabled={!projectId}>
                 <Save className="w-4 h-4 mr-2" />
                 Save Settings
               </Button>
+              {!projectId && (
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  Project ID required to save settings
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
