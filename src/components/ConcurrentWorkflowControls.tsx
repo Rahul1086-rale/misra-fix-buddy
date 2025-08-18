@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useConcurrentAppContext } from '@/context/ConcurrentAppContext';
 import { useToast } from '@/hooks/use-toast';
 import { concurrentApiClient } from '@/lib/concurrent-api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 import ViolationsModal from './ViolationsModal';
 import RequestStatusMonitor from './RequestStatusMonitor';
@@ -74,7 +75,7 @@ export default function ConcurrentWorkflowControls() {
       updateRequest(requestId, { status: 'processing' });
       dispatch({ type: 'SET_PROCESSING', payload: true });
       
-      const response = await concurrentApiClient.sendFirstPrompt(state.projectId);
+      const response = await concurrentApiClient.sendFirstPrompt(state.projectId, getAuthenticatedUsername());
       
       if (response.success && response.data && typeof response.data === 'object' && response.data !== null) {
         const data = response.data as { response?: string };
@@ -119,7 +120,7 @@ export default function ConcurrentWorkflowControls() {
       
       console.log(`Starting concurrent violation fix for project ${state.projectId}`);
       
-      const response = await concurrentApiClient.fixViolations(state.projectId, state.selectedViolations);
+      const response = await concurrentApiClient.fixViolations(state.projectId, getAuthenticatedUsername(), state.selectedViolations);
       
       updateRequest(requestId, { progress: 75 });
       

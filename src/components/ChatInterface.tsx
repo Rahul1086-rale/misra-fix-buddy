@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { useAppContext } from '@/context/AppContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function ChatInterface() {
@@ -97,7 +98,7 @@ export default function ChatInterface() {
         throw new Error('No project ID available');
       }
 
-      const response = await apiClient.sendChatMessage(message, state.projectId);
+      const response = await apiClient.sendChatMessage(message, state.projectId, getAuthenticatedUsername());
 
       if (response.success && response.data) {
         const assistantMessage = {

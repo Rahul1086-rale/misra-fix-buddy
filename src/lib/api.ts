@@ -106,27 +106,28 @@ class ApiClient {
   }
 
   // Gemini AI endpoints
-  async sendFirstPrompt(projectId: string): Promise<ApiResponse<GeminiResponse>> {
+  async sendFirstPrompt(projectId: string, username: string): Promise<ApiResponse<GeminiResponse>> {
     return this.request('/gemini/first-prompt', {
       method: 'POST',
-      body: JSON.stringify({ projectId, use_merged_file: true }),
+      body: JSON.stringify({ projectId, username }),
     });
   }
 
-  async fixViolations(projectId: string, violations: ViolationResponse[]): Promise<ApiResponse<GeminiResponse>> {
+  async fixViolations(projectId: string, username: string, violations: ViolationResponse[]): Promise<ApiResponse<GeminiResponse>> {
     return this.request('/gemini/fix-violations', {
       method: 'POST',
-      body: JSON.stringify({ projectId, violations }),
+      body: JSON.stringify({ projectId, username, violations }),
     });
   }
 
   async sendChatMessage(
     message: string,
-    projectId: string
+    projectId: string,
+    username: string
   ): Promise<ApiResponse<{ response: string }>> {
     return this.request('/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, projectId, use_merged_file: true }),
+      body: JSON.stringify({ message, projectId, username }),
     });
   }
 

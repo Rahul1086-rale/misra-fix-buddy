@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAppContext } from '@/context/AppContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 import ViolationsModal from './ViolationsModal';
 
@@ -55,7 +56,7 @@ export default function WorkflowControls() {
     if (!state.numberedFile || !state.projectId) return;
     try {
       dispatch({ type: 'SET_PROCESSING', payload: true });
-      const response = await apiClient.sendFirstPrompt(state.projectId);
+      const response = await apiClient.sendFirstPrompt(state.projectId, getAuthenticatedUsername());
       
       if (response.success && response.data) {
         const message = { 
@@ -85,7 +86,7 @@ export default function WorkflowControls() {
     if (!state.projectId || state.selectedViolations.length === 0) return;
     try {
       dispatch({ type: 'SET_PROCESSING', payload: true });
-      const response = await apiClient.fixViolations(state.projectId, state.selectedViolations);
+      const response = await apiClient.fixViolations(state.projectId, getAuthenticatedUsername(), state.selectedViolations);
       
       if (response.success && response.data) {
         const message = { 

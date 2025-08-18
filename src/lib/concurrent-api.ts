@@ -148,25 +148,25 @@ class ConcurrentApiClient {
     }, priority);
   }
 
-  async sendFirstPrompt(projectId: string, priority: number = 2) {
+  async sendFirstPrompt(projectId: string, username: string, priority: number = 2) {
     return this.queueRequest('/gemini/first-prompt', {
       method: 'POST',
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({ projectId, username }),
     }, priority);
   }
 
-  async fixViolations(projectId: string, violations: any[], priority: number = 1) {
-    console.log(`Queuing violation fix request for project ${projectId}`);
+  async fixViolations(projectId: string, username: string, violations: any[], priority: number = 1) {
+    console.log(`Queuing violation fix request for project ${projectId} and user ${username}`);
     return this.queueRequest('/gemini/fix-violations', {
       method: 'POST',
-      body: JSON.stringify({ projectId, violations }),
+      body: JSON.stringify({ projectId, username, violations }),
     }, priority);
   }
 
-  async sendChatMessage(message: string, projectId: string, priority: number = 1) {
+  async sendChatMessage(message: string, projectId: string, username: string, priority: number = 1) {
     return this.queueRequest('/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, projectId }),
+      body: JSON.stringify({ message, projectId, username }),
     }, priority);
   }
 

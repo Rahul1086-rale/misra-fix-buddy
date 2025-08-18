@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { useAppContext } from '@/context/AppContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ViolationsModalUpdatedProps {
@@ -70,7 +71,7 @@ export default function ViolationsModalUpdated({ isOpen, onClose, onFixComplete 
     setIsFixing(true);
     
     try {
-      const response = await apiClient.fixViolations(state.projectId, state.selectedViolations);
+      const response = await apiClient.fixViolations(state.projectId, getAuthenticatedUsername(), state.selectedViolations);
       
       if (response.success && response.data) {
         const message = { 

@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAppContext } from '@/context/AppContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 interface ChatFeedbackModalProps {
@@ -37,7 +38,7 @@ export default function ChatFeedbackModal({ isOpen, onClose }: ChatFeedbackModal
     setMessage('');
 
     try {
-      const response = await apiClient.sendChatMessage(message, state.projectId);
+      const response = await apiClient.sendChatMessage(message, state.projectId, getAuthenticatedUsername());
 
       if (response.success && response.data) {
         const assistantMessage = {

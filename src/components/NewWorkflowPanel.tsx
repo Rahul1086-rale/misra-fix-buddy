@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAppContext } from '@/context/AppContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/api';
+import { getAuthenticatedUsername } from '@/lib/auth-utils';
 import { v4 as uuidv4 } from 'uuid';
 import ViolationsModalUpdated from './ViolationsModalUpdated';
 import FixReviewModal from './FixReviewModal';
@@ -82,7 +83,7 @@ export default function NewWorkflowPanel() {
           }});
 
           // Start chat session
-          const chatResponse = await apiClient.sendFirstPrompt(projectId);
+          const chatResponse = await apiClient.sendFirstPrompt(projectId, getAuthenticatedUsername());
           
           if (chatResponse.success && chatResponse.data) {
             const message = { 
@@ -184,7 +185,7 @@ export default function NewWorkflowPanel() {
     setIsFixingViolations(true);
     
     try {
-      const response = await apiClient.fixViolations(state.projectId, state.selectedViolations);
+      const response = await apiClient.fixViolations(state.projectId, getAuthenticatedUsername(), state.selectedViolations);
       
       if (response.success && response.data) {
         const message = { 

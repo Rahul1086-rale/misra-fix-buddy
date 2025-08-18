@@ -74,9 +74,11 @@ class LineNumbersRequest(BaseModel):
 
 class FirstPromptRequest(BaseModel):
     projectId: str
+    username: str
 
 class FixViolationsRequest(BaseModel):
     projectId: str
+    username: str
     violations: List[Dict[str, Any]] = []
 
 class ApplyFixesRequest(BaseModel):
@@ -85,6 +87,7 @@ class ApplyFixesRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     projectId: str
+    username: str
 
 class ModelSettings(BaseModel):
     model_name: str
@@ -298,6 +301,7 @@ async def process_add_line_numbers(request: LineNumbersRequest):
 async def gemini_first_prompt(request: FirstPromptRequest):
     try:
         project_id = request.projectId
+        username = request.username
         session = session_manager.get_session(project_id)
         
         if not session:
@@ -310,13 +314,26 @@ async def gemini_first_prompt(request: FirstPromptRequest):
         # Load numbered file content
         numbered_content = load_cpp_file(numbered_file)
         
-        # Start chat session with current model settings
+        # Load user-specific model settings
+        def load_user_model_settings(username: str):
+            try:
+                user_settings_file = os.path.join(UPLOAD_FOLDER, f'{username}_model_setting.json')
+                if os.path.exists(user_settings_file):
+                    with open(user_settings_file, 'r') as f:
+                        return json.load(f)
+            except Exception:
+                pass
+            return default_model_settings
+        
+        user_settings = load_user_model_settings(username)
+        
+        # Start chat session with user's model settings
         chat = start_chat(
-            model_name=default_model_settings['model_name'],
-            temperature=default_model_settings['temperature'],
-            top_p=default_model_settings['top_p'],
-            max_tokens=default_model_settings['max_tokens'],
-            safety_settings=default_model_settings['safety_settings']
+            model_name=user_settings['model_name'],
+            temperature=user_settings['temperature'],
+            top_p=user_settings['top_p'],
+            max_tokens=user_settings['max_tokens'],
+            safety_settings=user_settings['safety_settings']
         )
         
         # Send first prompt
@@ -339,7 +356,7 @@ async def gemini_first_prompt(request: FirstPromptRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def process_violations_sync(project_id: str, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
+def process_violations_sync(project_id: str, username: str, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Synchronous function to process violations - runs in thread pool"""
     try:
         session = session_manager.get_session(project_id)
@@ -415,9 +432,10 @@ def process_violations_sync(project_id: str, violations: List[Dict[str, Any]]) -
 async def gemini_fix_violations(request: FixViolationsRequest):
     try:
         project_id = request.projectId
+        username = request.username
         violations = request.violations
         
-        print(f"Starting async violation processing for project {project_id}")
+        print(f"Starting async violation processing for project {project_id} and user {username}")
         
         # Process violations in thread pool for true concurrency
         loop = asyncio.get_event_loop()
@@ -425,6 +443,7 @@ async def gemini_fix_violations(request: FixViolationsRequest):
             executor, 
             process_violations_sync, 
             project_id, 
+            username,
             violations
         )
         
@@ -492,7 +511,7 @@ async def download_fixed_file(projectId: str = Query(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def process_chat_message_sync(project_id: str, message: str) -> str:
+def process_chat_message_sync(project_id: str, username: str, message: str) -> str:
     """Synchronous chat processing - runs in thread pool"""
     try:
         session = session_manager.get_session(project_id)
@@ -538,8 +557,9 @@ async def chat(request: ChatRequest):
     try:
         message = request.message
         project_id = request.projectId
+        username = request.username
         
-        print(f"Starting async chat processing for project {project_id}")
+        print(f"Starting async chat processing for project {project_id} and user {username}")
         
         # Process chat message in thread pool for concurrency
         loop = asyncio.get_event_loop()
@@ -547,6 +567,7 @@ async def chat(request: ChatRequest):
             executor, 
             process_chat_message_sync, 
             project_id, 
+            username,
             message
         )
         
